@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "module": "ESNext",
+    "target": "ES2018",
+    "moduleResolution": "bundler",
+    "importHelpers": true,
+    "isolatedModules": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "lib": ["ES6", "DOM"]
+  },
+  "include": ["src/**/*.ts"]
+}

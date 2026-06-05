@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# headnumatic – release build script
+#
+# Steps:
+#   1. Read current version from manifest.json
+#   2. Increment the patch version component
+#   3. Write the new version back to manifest.json and package.json
+#   4. Type-check TypeScript (no emit)
+#   5. Bundle with esbuild (production)
+#   6. Copy distributable files to ./build-output/
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# ── 1. Read version from manifest.json ──────────────────────────────────────
+CURRENT_VERSION="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('manifest.json','utf8')).version)")"
+
+# Split into major.minor.patch
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+# ── 2. Increment patch ───────────────────────────────────────────────────────
+PATCH=$(( PATCH + 1 ))
+NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+echo "Bumping version: ${CURRENT_VERSION} → ${NEW_VERSION}"
+
+# ── 3. Write new version to files ───────────────────────────────────────────
+
+# manifest.json
+node -e "
+const fs = require('fs');
+const m = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+m.version = '${NEW_VERSION}';
+fs.writeFileSync('manifest.json', JSON.stringify(m, null, 2) + '\n');
+"
+
+# package.json
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+pkg.version = '${NEW_VERSION}';
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+"
+
+# ── 4. TypeScript type-check ─────────────────────────────────────────────────
+echo "Type-checking TypeScript…"
+npx tsc --noEmit --skipLibCheck
+
+# ── 5. esbuild production bundle ─────────────────────────────────────────────
+echo "Bundling with esbuild (production)…"
+node esbuild.config.mjs production
+
+# ── 6. Assemble build-output/ ────────────────────────────────────────────────
+OUTPUT_DIR="build-output"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+cp main.js    "$OUTPUT_DIR/main.js"
+cp manifest.json "$OUTPUT_DIR/manifest.json"
+
+if [[ -f styles.css ]]; then
+  cp styles.css "$OUTPUT_DIR/styles.css"
+fi
+
+echo ""
+echo "Build complete → ${OUTPUT_DIR}/"
+echo "  Version : ${NEW_VERSION}"
+ls -lh "$OUTPUT_DIR"
