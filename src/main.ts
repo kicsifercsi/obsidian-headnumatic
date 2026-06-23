@@ -8,7 +8,7 @@ import {
 } from "obsidian";
 
 import { parseTechdocConfig, validateTechdocRaw, TechdocConfig } from "./numbering-parser";
-import { processHeadings, readTechdocProperty } from "./heading-engine";
+import { processHeadings, readTechdocProperty, mergeHeadingChanges } from "./heading-engine";
 import { updateHeadingLinks, updateLinksAfterRename } from "./link-updater";
 
 const MALFORMED_NOTICE = "Malformed settings, check techdoc-number property!";
@@ -194,7 +194,16 @@ export default class TechDocHeadingNumbering extends Plugin {
     skipLine?: number
   ): Promise<void> {
     const result = processHeadings(content, config, file.path, skipLine);
-    if (result.changes.length === 0) return;
+
+    // Read the on-disk content to detect title changes: processHeadings only
+    // records a change when its output differs from the current editor line, so
+    // a pure title rename (same number, different text) would be invisible to it.
+    // mergeHeadingChanges adds those missing changes by comparing the saved
+    // heading texts (what other files' links point to) with the new heading texts.
+    const savedContent = await this.app.vault.read(file);
+    const allChanges = mergeHeadingChanges(savedContent, result.newContent, result.changes);
+
+    if (result.changes.length === 0 && allChanges.length === 0) return;
 
     // Apply changes bottom-to-top so earlier line indices stay valid while
     // iterating (replaceRange within a single line never shifts line numbers,
@@ -226,7 +235,7 @@ export default class TechDocHeadingNumbering extends Plugin {
     const savedCursor = editor.getCursor();
 
     await this.app.vault.modify(file, result.newContent);
-    await updateHeadingLinks(this.app, file.path, result.changes);
+    await updateHeadingLinks(this.app, file.path, allChanges);
 
     // Restore cursor after any editor reload triggered by vault.modify.
     setTimeout(() => {

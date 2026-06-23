@@ -1,6 +1,15 @@
 import type { TechdocConfig, HeadingChange, NumberingResult } from "./types";
 import { formatValue, getFolderPrefix } from "./numbering-parser";
 
+function findBodyStart(lines: string[]): number {
+  if (lines[0]?.trimEnd() !== "---") return 0;
+  for (let i = 1; i < lines.length; i++) {
+    const t = lines[i].trimEnd();
+    if (t === "---" || t === "...") return i + 1;
+  }
+  return 0;
+}
+
 /**
  * Matches the number part of a heading we previously inserted.
  * A generated number consists of one or more segments (each either all-digits
@@ -77,18 +86,7 @@ export function processHeadings(
 ): NumberingResult {
   const lines = content.split("\n");
   const folderPrefix = config.usesFolderPrefix ? getFolderPrefix(filePath) : "";
-
-  // Find where frontmatter ends so we do not touch YAML headings.
-  let bodyStart = 0;
-  if (lines[0]?.trimEnd() === "---") {
-    for (let i = 1; i < lines.length; i++) {
-      const trimmed = lines[i].trimEnd();
-      if (trimmed === "---" || trimmed === "...") {
-        bodyStart = i + 1;
-        break;
-      }
-    }
-  }
+  const bodyStart = findBodyStart(lines);
 
   const numLevels = config.maxLevel - config.firstLevel + 1;
 
@@ -145,6 +143,56 @@ export function processHeadings(
   }
 
   return { newContent: newLines.join("\n"), changes };
+}
+
+/**
+ * Merge numbering-driven heading changes with title changes detected by
+ * comparing the on-disk content against the newly generated content
+ * line-by-line.
+ *
+ * processHeadings only records a change when its output line differs from the
+ * current editor line.  If the user renamed a heading title but the number
+ * stayed the same, no change is recorded — yet links in other files still
+ * point to the old heading text.  This function closes that gap by comparing
+ * the last saved content (what other files' links point to) with the new
+ * content at each heading line.  Existing changes from processHeadings take
+ * priority; additional title-change entries are appended.
+ */
+export function mergeHeadingChanges(
+  savedContent: string,
+  newContent: string,
+  existingChanges: HeadingChange[]
+): HeadingChange[] {
+  const covered = new Set(existingChanges.map((c) => c.oldText));
+  const extra: HeadingChange[] = [];
+
+  const savedLines = savedContent.split("\n");
+  const newLines = newContent.split("\n");
+  const bodyStart = findBodyStart(savedLines);
+  const limit = Math.min(savedLines.length, newLines.length);
+  let insideCode = false;
+
+  for (let i = bodyStart; i < limit; i++) {
+    const sLine = savedLines[i];
+
+    if (/^(`{3,}|~{3,})/.test(sLine)) {
+      insideCode = !insideCode;
+      continue;
+    }
+    if (insideCode) continue;
+
+    const sm = sLine.match(/^(#{1,6}) (.+)$/);
+    const nm = newLines[i].match(/^(#{1,6}) (.+)$/);
+    if (!sm || !nm || sm[1] !== nm[1]) continue;
+
+    const oldText = sm[2];
+    const newText = nm[2];
+    if (oldText === newText || covered.has(oldText)) continue;
+
+    extra.push({ oldText, newText, level: sm[1].length, line: i });
+  }
+
+  return [...existingChanges, ...extra];
 }
 
 /**
