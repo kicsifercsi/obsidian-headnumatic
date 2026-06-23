@@ -3,6 +3,33 @@ import type { FormatPart, FormatPartType, TechdocConfig } from "./types";
 export type { TechdocConfig };
 
 /**
+ * Returns true when every comma-separated token in the raw property value is a
+ * recognised directive and the required `format` directive is present.
+ *
+ * Catches common mistakes such as a missing comma between directives (e.g.
+ * "format ?.001 start-values ?.1" fails because a valid format value never
+ * contains whitespace — the space signals a swallowed token).
+ */
+export function validateTechdocRaw(rawValue: unknown): boolean {
+  if (!rawValue) return false;
+  const raw = Array.isArray(rawValue) ? rawValue.join(", ") : String(rawValue);
+  const tokens = raw.split(/,\s*/);
+  let hasFormat = false;
+
+  for (const token of tokens) {
+    const t = token.trim();
+    if (t === "auto-refresh") continue;
+    if (/^first-level \d+$/.test(t)) continue;
+    if (/^max-level \d+$/.test(t)) continue;
+    if (/^format \S+$/.test(t)) { hasFormat = true; continue; }
+    if (/^start-values \S+$/.test(t)) continue;
+    return false; // Unknown or malformed token (e.g. space inside value)
+  }
+
+  return hasFormat;
+}
+
+/**
  * Parse the value of the `techdoc-numbering` frontmatter property.
  * Returns null when the value is missing or no format is specified.
  *

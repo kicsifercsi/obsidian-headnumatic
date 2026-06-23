@@ -7,9 +7,11 @@ import {
   MarkdownView,
 } from "obsidian";
 
-import { parseTechdocConfig, TechdocConfig } from "./numbering-parser";
+import { parseTechdocConfig, validateTechdocRaw, TechdocConfig } from "./numbering-parser";
 import { processHeadings, readTechdocProperty } from "./heading-engine";
 import { updateHeadingLinks, updateLinksAfterRename } from "./link-updater";
+
+const MALFORMED_NOTICE = "Malformed settings, check techdoc-number property!";
 
 export default class TechDocHeadingNumbering extends Plugin {
   /** Debounce timers keyed by file path. */
@@ -86,8 +88,17 @@ export default class TechDocHeadingNumbering extends Plugin {
         const rawProp = readTechdocProperty(content);
         if (!rawProp) return;
 
+        if (!validateTechdocRaw(rawProp)) {
+          new Notice(MALFORMED_NOTICE);
+          return;
+        }
+
         const config = parseTechdocConfig(rawProp);
-        if (!config?.autoRefresh) return;
+        if (!config) {
+          new Notice(MALFORMED_NOTICE);
+          return;
+        }
+        if (!config.autoRefresh) return;
 
         // Option 1: pass the cursor line so processHeadings skips it while typing.
         const cursorLine = editor.getCursor().line;
@@ -118,9 +129,14 @@ export default class TechDocHeadingNumbering extends Plugin {
         return;
       }
 
+      if (!validateTechdocRaw(rawProp)) {
+        new Notice(MALFORMED_NOTICE);
+        return;
+      }
+
       const config = parseTechdocConfig(rawProp);
       if (!config) {
-        new Notice("Could not parse 'techdoc-numbering' property.");
+        new Notice(MALFORMED_NOTICE);
         return;
       }
 

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { processHeadings } from "../src/heading-engine";
-import { parseTechdocConfig } from "../src/numbering-parser";
+import { parseTechdocConfig, validateTechdocRaw } from "../src/numbering-parser";
 
 // Note: a comma is required between each directive. The original spec had
 // "format ?.01.01.01 start-values ?.1.1.1" (no comma), which would cause
@@ -358,4 +358,92 @@ test("TEST 5 – headings beyond max-level are left unchanged", () => {
 
   // Only ## and ### headings are within range — 2 changes.
   assert.strictEqual(result.changes.length, 2, "2 headings should be numbered (TEST 5)");
+});
+
+// ---------------------------------------------------------------------------
+
+// TEST 6 uses the malformed config string from the spec — the comma between
+// "format" and "start-values" is intentionally missing.  The purpose of the
+// test is twofold:
+//   1. Assert that validateTechdocRaw catches it (returns false) so the plugin
+//      shows an error notice instead of silently producing wrong output.
+//   2. Document the wrong output the parser would produce if validation were
+//      bypassed: "01 start-values ?" is not a valid format segment so it is
+//      silently dropped, and the stray "1" segments become {plain,1} parts
+//      instead of {zeros,2} — causing #### headings to show "1" not "01".
+const CONFIG_RAW_6 =
+  "auto-refresh, first-level 2, max-level 7, format ?.01.01.01 start-values ?.1.1.1";
+
+const FILE_PATH_6 = "mainb/blah.md";
+
+const INPUT_6 = [
+  "---",
+  `techdoc-numbering: ${CONFIG_RAW_6}`,
+  "---",
+  "# first",
+  "## one",
+  "## two",
+  "## three",
+  "### threeone",
+  "### threetwo",
+  "#### threetwoone",
+  "##### threetwooneone",
+  "#### threetwotwo",
+].join("\n");
+
+// These are the WRONG outputs produced when the malformed config is parsed
+// without validation.  Level-3 and deeper headings use {plain,1} instead of
+// {zeros,2} because the "01 start-values ?" segment was silently discarded and
+// the "1" segments that followed it became plain-integer format parts.
+// prettier-ignore
+const EXPECTED_LINES_6_BYPASSED = [
+  "---",
+  `techdoc-numbering: ${CONFIG_RAW_6}`,
+  "---",
+  "# first",
+  "## 01 - one",
+  "## 02 - two",
+  "## 03 - three",
+  "### 03.01 - threeone",
+  "### 03.02 - threetwo",
+  "#### 03.02.1 - threetwoone",          // wrong: "1" instead of "01"
+  "##### 03.02.1.1 - threetwooneone",    // wrong: "1.1" instead of "01.1"
+  "#### 03.02.2 - threetwotwo",          // wrong: "2" instead of "02"
+];
+
+test("TEST 6 – malformed config (missing comma) is caught by validateTechdocRaw", () => {
+  // Primary assertion: the validator must reject this config.
+  assert.strictEqual(
+    validateTechdocRaw(CONFIG_RAW_6),
+    false,
+    "missing comma between format and start-values should fail validation"
+  );
+
+  // Secondary: document the broken parse result when validation is bypassed.
+  // parseTechdocConfig still returns a non-null config (it does not detect the
+  // missing comma), but the format parts are wrong.
+  const config = parseTechdocConfig(CONFIG_RAW_6);
+  if (!config) throw new Error("parseTechdocConfig unexpectedly returned null");
+
+  // The "01 start-values ?" segment is dropped; the three "1" trailing segments
+  // become {plain,1} parts, giving only 2 {zeros,2} parts instead of 3.
+  assert.deepStrictEqual(
+    config.formatParts.slice(0, 3).map((p) => ({ type: p.type, digits: p.digits })),
+    [
+      { type: "zeros", digits: 2 },
+      { type: "zeros", digits: 2 },
+      { type: "plain", digits: 1 }, // ← should have been {zeros,2}
+    ]
+  );
+
+  const result = processHeadings(INPUT_6, config, FILE_PATH_6);
+  const outputLines = result.newContent.split("\n");
+
+  for (let i = 0; i < EXPECTED_LINES_6_BYPASSED.length; i++) {
+    assert.strictEqual(
+      outputLines[i],
+      EXPECTED_LINES_6_BYPASSED[i],
+      `line ${i + 1} mismatch`
+    );
+  }
 });
