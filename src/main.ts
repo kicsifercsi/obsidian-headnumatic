@@ -216,8 +216,26 @@ export default class TechDocHeadingNumbering extends Plugin {
       this.applyingNumbering = false;
     }
 
+    // CM6's change mapping has already placed the cursor correctly after the
+    // replaceRange calls above.  vault.modify() persists the changes to disk,
+    // but Obsidian may respond by calling editor.setValue() internally to
+    // reconcile the file with the editor — which resets the cursor via an
+    // absolute-offset mapping that can land on a different line when headings
+    // above the cursor changed length.  Saving the cursor now and restoring it
+    // on the next tick (after Obsidian's potential reload) fixes this.
+    const savedCursor = editor.getCursor();
+
     await this.app.vault.modify(file, result.newContent);
     await updateHeadingLinks(this.app, file.path, result.changes);
+
+    // Restore cursor after any editor reload triggered by vault.modify.
+    setTimeout(() => {
+      try {
+        editor.setCursor(savedCursor);
+      } catch {
+        // editor may have been closed; ignore
+      }
+    }, 0);
   }
 
   /**
