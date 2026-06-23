@@ -8,8 +8,13 @@ import {
 } from "obsidian";
 
 import { parseTechdocConfig, validateTechdocRaw, TechdocConfig } from "./numbering-parser";
-import { processHeadings, readTechdocProperty, mergeHeadingChanges } from "./heading-engine";
-import { updateHeadingLinks, updateLinksAfterRename } from "./link-updater";
+import { processHeadings, readTechdocProperty, parseHeadings, diffHeadings } from "./heading-engine";
+import {
+  updateHeadingLinks,
+  updateLinksAfterRename,
+  rewriteHeadingLinksInContent,
+} from "./link-updater";
+import type { HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check techdoc-number property!";
 
@@ -19,6 +24,16 @@ export default class TechDocHeadingNumbering extends Plugin {
 
   /** Last known cursor line per file, used to detect when the cursor leaves the settings line. */
   private prevCursorLines: Map<string, number> = new Map();
+
+  /**
+   * Per-file snapshot of the headings as they were the last time the plugin
+   * reconciled this note (or when it was opened).  This is the reliable
+   * reference for what links elsewhere in the vault currently point to; diffing
+   * it against the freshly numbered headings yields the old→new text mappings
+   * used to rewrite those links.  Kept in memory and only updated after a
+   * successful reconcile, so it never depends on the editor/disk save race.
+   */
+  private headingSnapshots: Map<string, HeadingEntry[]> = new Map();
 
   /**
    * Set to true while we are programmatically writing to an editor so that
@@ -72,12 +87,37 @@ export default class TechDocHeadingNumbering extends Plugin {
         await this.handleRename(file, oldPath);
       })
     );
+
+    // Seed the heading snapshot whenever a note becomes active so the first
+    // edit has a correct "before" reference for link updates.
+    this.registerEvent(
+      this.app.workspace.on("file-open", async (file) => {
+        if (file) await this.seedSnapshot(file);
+      })
+    );
+
+    // file-open does not fire for the note that is already open at load time.
+    this.app.workspace.onLayoutReady(() => {
+      const activeFile = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+      if (activeFile) void this.seedSnapshot(activeFile);
+    });
   }
 
   onunload() {
     for (const timer of this.refreshTimers.values()) clearTimeout(timer);
     this.refreshTimers.clear();
     this.prevCursorLines.clear();
+    this.headingSnapshots.clear();
+  }
+
+  /** Record the current headings of `file` as the snapshot reference. */
+  private async seedSnapshot(file: TFile): Promise<void> {
+    try {
+      const content = await this.app.vault.read(file);
+      this.headingSnapshots.set(file.path, parseHeadings(content));
+    } catch {
+      // file may be unreadable (e.g. just deleted); ignore
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -195,32 +235,38 @@ export default class TechDocHeadingNumbering extends Plugin {
   ): Promise<void> {
     const result = processHeadings(content, config, file.path, skipLine);
 
-    // Read the on-disk content to detect title changes: processHeadings only
-    // records a change when its output differs from the current editor line, so
-    // a pure title rename (same number, different text) would be invisible to it.
-    // mergeHeadingChanges adds those missing changes by comparing the saved
-    // heading texts (what other files' links point to) with the new heading texts.
-    const savedContent = await this.app.vault.read(file);
-    const allChanges = mergeHeadingChanges(savedContent, result.newContent, result.changes);
+    // Diff the heading snapshot (what links currently point to) against the
+    // freshly numbered headings to get reliable old→new text mappings. This
+    // catches both renumbering and pure title renames, and — unlike comparing
+    // against disk — never loses the "old" text to an editor/disk save race.
+    const oldHeadings = this.headingSnapshots.get(file.path) ?? parseHeadings(content);
+    const newHeadings = parseHeadings(result.newContent);
+    const linkChanges = diffHeadings(oldHeadings, newHeadings);
 
-    if (result.changes.length === 0 && allChanges.length === 0) return;
+    if (result.changes.length === 0 && linkChanges.length === 0) {
+      // Nothing changed, but keep the snapshot current.
+      this.headingSnapshots.set(file.path, newHeadings);
+      return;
+    }
 
-    // Apply changes bottom-to-top so earlier line indices stay valid while
-    // iterating (replaceRange within a single line never shifts line numbers,
-    // but the order is a cheap safety net).
-    const sortedChanges = [...result.changes].sort((a, b) => b.line - a.line);
+    // Rewrite this note's own links to its headings in the same content we are
+    // about to apply. Self-links must be updated in the editor buffer (not on
+    // disk) or the editor's unsaved content would clobber the change.
+    const changeMap = new Map(linkChanges.map((c) => [c.oldText, c.newText]));
+    const targetFile = this.app.vault.getAbstractFileByPath(file.path) as TFile;
+    const finalContent = rewriteHeadingLinksInContent(
+      result.newContent,
+      targetFile,
+      changeMap,
+      this.app
+    );
 
-    // Guard against each replaceRange triggering another editor-change → debounce.
+    // Apply every changed line (heading renumbering + self-link rewrites) with
+    // per-line replaceRange so CodeMirror maps the cursor correctly. Lines left
+    // untouched (including the skipped cursor line) are not rewritten.
     this.applyingNumbering = true;
     try {
-      for (const change of sortedChanges) {
-        const hashes = "#".repeat(change.level);
-        editor.replaceRange(
-          `${hashes} ${change.newText}`,
-          { line: change.line, ch: 0 },
-          { line: change.line, ch: hashes.length + 1 + change.oldText.length }
-        );
-      }
+      this.applyLineDiff(editor, content, finalContent);
     } finally {
       this.applyingNumbering = false;
     }
@@ -234,8 +280,14 @@ export default class TechDocHeadingNumbering extends Plugin {
     // on the next tick (after Obsidian's potential reload) fixes this.
     const savedCursor = editor.getCursor();
 
-    await this.app.vault.modify(file, result.newContent);
-    await updateHeadingLinks(this.app, file.path, allChanges);
+    if (finalContent !== content) {
+      await this.app.vault.modify(file, finalContent);
+    }
+    // Update links in every OTHER note; the active note was handled above.
+    await updateHeadingLinks(this.app, file.path, linkChanges, file.path);
+
+    // The reconcile is complete and consistent — refresh the snapshot.
+    this.headingSnapshots.set(file.path, newHeadings);
 
     // Restore cursor after any editor reload triggered by vault.modify.
     setTimeout(() => {
@@ -245,6 +297,27 @@ export default class TechDocHeadingNumbering extends Plugin {
         // editor may have been closed; ignore
       }
     }, 0);
+  }
+
+  /**
+   * Apply the line-level differences between `oldContent` and `newContent` to
+   * the editor using replaceRange per changed line. Link/heading rewrites never
+   * add or remove lines, so a positional line comparison is sufficient and keeps
+   * the cursor mapping stable.
+   */
+  private applyLineDiff(editor: Editor, oldContent: string, newContent: string): void {
+    const oldLines = oldContent.split("\n");
+    const newLines = newContent.split("\n");
+    // Apply bottom-to-top as a cheap safety net for line-index validity.
+    for (let i = newLines.length - 1; i >= 0; i--) {
+      const oldLine = oldLines[i] ?? "";
+      if (oldLine === newLines[i]) continue;
+      editor.replaceRange(
+        newLines[i],
+        { line: i, ch: 0 },
+        { line: i, ch: oldLine.length }
+      );
+    }
   }
 
   /**
@@ -261,13 +334,19 @@ export default class TechDocHeadingNumbering extends Plugin {
 
     const result = processHeadings(content, config, file.path);
 
+    const oldHeadings = this.headingSnapshots.get(file.path) ?? parseHeadings(content);
+    const newHeadings = parseHeadings(result.newContent);
+    const linkChanges = diffHeadings(oldHeadings, newHeadings);
+
     if (result.newContent !== content) {
       await this.app.vault.modify(file, result.newContent);
     }
 
-    if (result.changes.length > 0) {
-      await updateHeadingLinks(this.app, file.path, result.changes);
+    if (linkChanges.length > 0) {
+      await updateHeadingLinks(this.app, file.path, linkChanges);
     }
+
+    this.headingSnapshots.set(file.path, newHeadings);
   }
 
   /** Refresh every note in the vault that carries the techdoc-numbering property. */
@@ -301,6 +380,12 @@ export default class TechDocHeadingNumbering extends Plugin {
 
   private async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
     try {
+      // Keep the snapshot keyed by the new path.
+      const snapshot = this.headingSnapshots.get(oldPath);
+      if (snapshot) {
+        this.headingSnapshots.delete(oldPath);
+        this.headingSnapshots.set(file.path, snapshot);
+      }
       await updateLinksAfterRename(this.app, oldPath, file.path);
     } catch (e) {
       console.error("[TechDoc Heading Numbering] rename handler error:", e);

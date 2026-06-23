@@ -24,6 +24,19 @@ export interface TechdocConfig {
   startNums: (number | null)[];
 }
 
+/**
+ * A snapshot of a single heading as it currently exists in a note.
+ * Used as the "last consistent" reference for computing link updates.
+ */
+export interface HeadingEntry {
+  /** Markdown heading level (1–6). */
+  level: number;
+  /** Full heading text (everything after the "#" chars and the space). */
+  text: string;
+  /** 0-indexed line number in the file. */
+  line: number;
+}
+
 export interface HeadingChange {
   /** Full heading text as it appeared before renumbering (everything after the "#" chars and space). */
   oldText: string;

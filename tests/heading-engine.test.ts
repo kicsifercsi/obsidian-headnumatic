@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { processHeadings } from "../src/heading-engine";
+import { processHeadings, parseHeadings, diffHeadings } from "../src/heading-engine";
 import { parseTechdocConfig, validateTechdocRaw } from "../src/numbering-parser";
+import type { HeadingEntry } from "../src/types";
 
 // Note: a comma is required between each directive. The original spec had
 // "format ?.01.01.01 start-values ?.1.1.1" (no comma), which would cause
@@ -446,4 +447,62 @@ test("TEST 6 – malformed config (missing comma) is caught by validateTechdocRa
       `line ${i + 1} mismatch`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// diffHeadings — old→new mappings that drive vault-wide link updates.
+// ---------------------------------------------------------------------------
+
+/** Parse headings from a body (frontmatter is prepended for realism). */
+function headings(body: string[]): HeadingEntry[] {
+  return parseHeadings(["---", "techdoc-numbering: x", "---", ...body].join("\n"));
+}
+
+/** Collapse a diff to [oldText, newText] pairs for easy assertions. */
+function pairs(old: HeadingEntry[], next: HeadingEntry[]): Array<[string, string]> {
+  return diffHeadings(old, next).map((c) => [c.oldText, c.newText]);
+}
+
+test("TEST 7 – diffHeadings: renumber after inserting a heading", () => {
+  const old = headings(["# 001 - A", "# 002 - B"]);
+  const next = headings(["# 001 - A", "# 002 - New", "# 003 - B"]);
+  // A unchanged; "New" is an insertion (no mapping); B renumbered 002 → 003.
+  assert.deepStrictEqual(pairs(old, next), [["002 - B", "003 - B"]]);
+});
+
+test("TEST 8 – diffHeadings: renumber after deleting a heading", () => {
+  const old = headings(["# 001 - A", "# 002 - B", "# 003 - C"]);
+  const next = headings(["# 001 - A", "# 002 - C"]);
+  // B deleted (no mapping); C renumbered 003 → 002.
+  assert.deepStrictEqual(pairs(old, next), [["003 - C", "002 - C"]]);
+});
+
+test("TEST 9 – diffHeadings: pure title rename (number unchanged)", () => {
+  const old = headings(["# 001 - Intro"]);
+  const next = headings(["# 001 - Introduction"]);
+  assert.deepStrictEqual(pairs(old, next), [["001 - Intro", "001 - Introduction"]]);
+});
+
+test("TEST 10 – diffHeadings: title rename with a line inserted above it", () => {
+  // The renamed heading sits on a different line index in the new content;
+  // the old line-index comparison missed this, the LCS-based diff does not.
+  const old = headings(["# 001 - Intro", "# 002 - Setup"]);
+  const next = headings(["# 001 - Intro", "a new paragraph", "more text", "# 002 - Renamed"]);
+  assert.deepStrictEqual(pairs(old, next), [["002 - Setup", "002 - Renamed"]]);
+});
+
+test("TEST 11 – diffHeadings: no change yields no mappings", () => {
+  const same = ["# 001 - A", "## 001.01 - B", "# 002 - C"];
+  assert.deepStrictEqual(pairs(headings(same), headings(same)), []);
+});
+
+test("TEST 12 – diffHeadings: simultaneous insert + renumber + rename", () => {
+  const old = headings(["# 001 - Alpha", "# 002 - Beta"]);
+  // Inserted "Gamma" at top pushes everything down; Beta also renamed.
+  const next = headings(["# 001 - Gamma", "# 002 - Alpha", "# 003 - BetaPrime"]);
+  // Alpha 001 → 002 (renumber); Beta → BetaPrime paired in the trailing gap.
+  assert.deepStrictEqual(pairs(old, next), [
+    ["001 - Alpha", "002 - Alpha"],
+    ["002 - Beta", "003 - BetaPrime"],
+  ]);
 });

@@ -1,6 +1,6 @@
 {
   "name": "headnumatic",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "description": "Obsidian plugin for automatic heading numbering in technical documentation",
   "main": "main.js",
   "scripts": {

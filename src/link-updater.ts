@@ -15,13 +15,22 @@ import type { HeadingChange } from "./types";
  *   [[Note#Old Heading Text|Display]]
  *   [[path/to/Note#Old Heading Text]]
  *   [text](Note#Old%20Heading%20Text)   (encoded or plain)
+ *
+ * `skipPath` lets the caller exclude a file it will update by other means — in
+ * particular the currently-open note, whose self-links must be rewritten in the
+ * live editor buffer rather than on disk (a disk write would be clobbered by the
+ * editor's unsaved content).
  */
 export async function updateHeadingLinks(
   app: App,
   changedFilePath: string,
-  changes: HeadingChange[]
+  changes: HeadingChange[],
+  skipPath?: string
 ): Promise<void> {
   if (changes.length === 0) return;
+
+  const targetFile = app.vault.getAbstractFileByPath(changedFilePath) as TFile | null;
+  if (!targetFile) return;
 
   // Build a map of oldText → newText for quick lookup.
   const changeMap = new Map<string, string>(
@@ -31,12 +40,10 @@ export async function updateHeadingLinks(
   const files = app.vault.getMarkdownFiles();
 
   for (const file of files) {
-    const content = await app.vault.read(file);
-    let updated = content;
+    if (skipPath && file.path === skipPath) continue;
 
-    for (const [oldText, newText] of changeMap) {
-      updated = replaceHeadingInLinks(updated, changedFilePath, oldText, newText, app);
-    }
+    const content = await app.vault.read(file);
+    const updated = rewriteHeadingLinksInContent(content, targetFile, changeMap, app);
 
     if (updated !== content) {
       await app.vault.modify(file, updated);
@@ -44,18 +51,31 @@ export async function updateHeadingLinks(
   }
 }
 
+/**
+ * Pure helper: return `content` with every link that points to a heading in
+ * `changeMap` (on `targetFile`) rewritten to the new heading text. Does no I/O,
+ * so it can be applied either to disk content or to a live editor buffer.
+ */
+export function rewriteHeadingLinksInContent(
+  content: string,
+  targetFile: TFile,
+  changeMap: Map<string, string>,
+  app: App
+): string {
+  let updated = content;
+  for (const [oldText, newText] of changeMap) {
+    updated = replaceHeadingInLinks(updated, targetFile, oldText, newText, app);
+  }
+  return updated;
+}
+
 function replaceHeadingInLinks(
   content: string,
-  targetFilePath: string,
+  targetFile: TFile,
   oldHeading: string,
   newHeading: string,
   app: App
 ): string {
-  const targetFile = app.vault.getAbstractFileByPath(targetFilePath) as TFile | null;
-  if (!targetFile) return content;
-
-  const targetBasename = targetFile.basename; // filename without extension
-
   // Escape special regex characters in the heading text.
   const oldEsc = escapeRegex(oldHeading);
   const newHeadingEsc = newHeading;
