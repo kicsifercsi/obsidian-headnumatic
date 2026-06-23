@@ -89,7 +89,9 @@ export default class TechDocHeadingNumbering extends Plugin {
         const config = parseTechdocConfig(rawProp);
         if (!config?.autoRefresh) return;
 
-        await this.applyToEditor(editor, file, content, config);
+        // Option 1: pass the cursor line so processHeadings skips it while typing.
+        const cursorLine = editor.getCursor().line;
+        await this.applyToEditor(editor, file, content, config, cursorLine);
       } catch (e) {
         console.error("[TechDoc Heading Numbering] auto-refresh error:", e);
       }
@@ -138,9 +140,10 @@ export default class TechDocHeadingNumbering extends Plugin {
     editor: Editor,
     file: TFile,
     content: string,
-    config: TechdocConfig
+    config: TechdocConfig,
+    skipLine?: number
   ): Promise<void> {
-    const result = processHeadings(content, config, file.path);
+    const result = processHeadings(content, config, file.path, skipLine);
     if (result.newContent === content && result.changes.length === 0) return;
 
     if (result.newContent !== content) {
@@ -154,11 +157,23 @@ export default class TechDocHeadingNumbering extends Plugin {
         this.applyingNumbering = false;
       }
 
-      // Restore cursor, clamped to new line count.
+      // Option 3: if the cursor's line was renumbered, shift ch by the length
+      // delta so the cursor stays at the same position within the title text.
+      // The heading text starts at column (level + 1), e.g. "## " = col 3.
+      const changeOnCursorLine = result.changes.find((c) => c.line === cursor.line);
+      let newCh = cursor.ch;
+      if (changeOnCursorLine) {
+        const textStartCh = changeOnCursorLine.level + 1;
+        if (cursor.ch >= textStartCh) {
+          const delta = changeOnCursorLine.newText.length - changeOnCursorLine.oldText.length;
+          newCh = Math.max(textStartCh, cursor.ch + delta);
+        }
+      }
+
       const totalLines = result.newContent.split("\n").length;
       editor.setCursor({
         line: Math.min(cursor.line, totalLines - 1),
-        ch: cursor.ch,
+        ch: newCh,
       });
 
       // Persist to disk so the file is saved with the new content.

@@ -1,12 +1,13 @@
 {
   "name": "headnumatic",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Obsidian plugin for automatic heading numbering in technical documentation",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "keywords": [
     "obsidian",
@@ -25,6 +26,7 @@
     "esbuild": "^0.20.0",
     "obsidian": "latest",
     "tslib": "^2.4.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.0.0"
   }
 }

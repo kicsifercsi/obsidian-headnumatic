@@ -36,7 +36,7 @@ export function parseTechdocConfig(rawValue: unknown): TechdocConfig | null {
       if (!isNaN(n) && n >= 1 && n <= 6) config.firstLevel = n;
     } else if (t.startsWith("max-level ")) {
       const n = parseInt(t.slice("max-level ".length), 10);
-      if (!isNaN(n) && n >= 1 && n <= 6) config.maxLevel = n;
+      if (!isNaN(n) && n >= 1) config.maxLevel = n;
     } else if (t.startsWith("format ")) {
       config.format = t.slice("format ".length).trim();
     } else if (t.startsWith("start-values ")) {
@@ -51,6 +51,15 @@ export function parseTechdocConfig(rawValue: unknown): TechdocConfig | null {
   config.formatParts = parts;
   config.usesFolderPrefix = usesFolderPrefix;
   config.startNums = parseStartNums(config.startValues, parts);
+
+  // Pad formatParts and startNums to cover every level implied by max-level.
+  const numLevels = Math.max(0, config.maxLevel - config.firstLevel + 1);
+  while (config.formatParts.length < numLevels) {
+    config.formatParts.push({ type: "plain", digits: 1 });
+  }
+  while (config.startNums.length < numLevels) {
+    config.startNums.push(null);
+  }
 
   return config;
 }
