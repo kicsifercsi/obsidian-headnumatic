@@ -17,6 +17,9 @@ export default class TechDocHeadingNumbering extends Plugin {
   /** Debounce timers keyed by file path. */
   private refreshTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
+  /** Last known cursor line per file, used to detect when the cursor leaves the settings line. */
+  private prevCursorLines: Map<string, number> = new Map();
+
   /**
    * Set to true while we are programmatically writing to an editor so that
    * the resulting editor-change event does not re-trigger auto-refresh.
@@ -53,10 +56,14 @@ export default class TechDocHeadingNumbering extends Plugin {
 
     // Auto-refresh: pass both editor and file into the debounce closure so
     // the callback can update the editor directly 600 ms later.
+    // Also check if the cursor has just left the settings line so we can
+    // show the malformed-settings notice at the right moment.
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor: Editor, view: MarkdownView) => {
         if (this.applyingNumbering) return;
-        if (view.file) this.scheduleAutoRefresh(editor, view.file);
+        if (!view.file) return;
+        this.checkSettingsOnLeave(editor, view.file);
+        this.scheduleAutoRefresh(editor, view.file);
       })
     );
 
@@ -70,6 +77,37 @@ export default class TechDocHeadingNumbering extends Plugin {
   onunload() {
     for (const timer of this.refreshTimers.values()) clearTimeout(timer);
     this.refreshTimers.clear();
+    this.prevCursorLines.clear();
+  }
+
+  // -------------------------------------------------------------------------
+  // Settings validation on cursor leave
+  // -------------------------------------------------------------------------
+
+  /**
+   * Called on every editor-change event. Tracks the cursor line; when the
+   * cursor moves away from the `techdoc-numbering` frontmatter line, the
+   * settings are validated and an error notice is shown if they are malformed.
+   * This fires reliably whenever the user presses Enter, types on a new line,
+   * or makes any content change after leaving the settings line.
+   */
+  private checkSettingsOnLeave(editor: Editor, file: TFile): void {
+    const curLine = editor.getCursor().line;
+    const prevLine = this.prevCursorLines.get(file.path);
+    this.prevCursorLines.set(file.path, curLine);
+
+    if (prevLine === undefined || prevLine === curLine) return;
+
+    const content = editor.getValue();
+    const lines = content.split("\n");
+    if (!/^techdoc-numbering\s*:/.test(lines[prevLine] ?? "")) return;
+
+    // Cursor just left the settings line — validate now.
+    const rawProp = readTechdocProperty(content);
+    if (!rawProp) return;
+    if (!validateTechdocRaw(rawProp) || !parseTechdocConfig(rawProp)) {
+      new Notice(MALFORMED_NOTICE);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -88,17 +126,12 @@ export default class TechDocHeadingNumbering extends Plugin {
         const rawProp = readTechdocProperty(content);
         if (!rawProp) return;
 
-        if (!validateTechdocRaw(rawProp)) {
-          new Notice(MALFORMED_NOTICE);
-          return;
-        }
+        // Malformed-settings feedback is handled by checkSettingsOnLeave;
+        // silently skip here so the auto-refresh never spams notices.
+        if (!validateTechdocRaw(rawProp)) return;
 
         const config = parseTechdocConfig(rawProp);
-        if (!config) {
-          new Notice(MALFORMED_NOTICE);
-          return;
-        }
-        if (!config.autoRefresh) return;
+        if (!config?.autoRefresh) return;
 
         // Option 1: pass the cursor line so processHeadings skips it while typing.
         const cursorLine = editor.getCursor().line;
@@ -149,8 +182,9 @@ export default class TechDocHeadingNumbering extends Plugin {
 
   /**
    * Apply computed heading numbering to an open editor.
-   * Uses editor.setValue() for immediate visual feedback, then persists to
-   * disk via vault.modify().  Cursor position is preserved where possible.
+   * Each changed line is updated with editor.replaceRange() so that
+   * CodeMirror's own change-mapping keeps the cursor in the right place —
+   * no manual cursor save/restore is needed.
    */
   private async applyToEditor(
     editor: Editor,
@@ -160,45 +194,30 @@ export default class TechDocHeadingNumbering extends Plugin {
     skipLine?: number
   ): Promise<void> {
     const result = processHeadings(content, config, file.path, skipLine);
-    if (result.newContent === content && result.changes.length === 0) return;
+    if (result.changes.length === 0) return;
 
-    if (result.newContent !== content) {
-      const cursor = editor.getCursor();
+    // Apply changes bottom-to-top so earlier line indices stay valid while
+    // iterating (replaceRange within a single line never shifts line numbers,
+    // but the order is a cheap safety net).
+    const sortedChanges = [...result.changes].sort((a, b) => b.line - a.line);
 
-      // Guard against the setValue triggering another editor-change → debounce.
-      this.applyingNumbering = true;
-      try {
-        editor.setValue(result.newContent);
-      } finally {
-        this.applyingNumbering = false;
+    // Guard against each replaceRange triggering another editor-change → debounce.
+    this.applyingNumbering = true;
+    try {
+      for (const change of sortedChanges) {
+        const hashes = "#".repeat(change.level);
+        editor.replaceRange(
+          `${hashes} ${change.newText}`,
+          { line: change.line, ch: 0 },
+          { line: change.line, ch: hashes.length + 1 + change.oldText.length }
+        );
       }
-
-      // Option 3: if the cursor's line was renumbered, shift ch by the length
-      // delta so the cursor stays at the same position within the title text.
-      // The heading text starts at column (level + 1), e.g. "## " = col 3.
-      const changeOnCursorLine = result.changes.find((c) => c.line === cursor.line);
-      let newCh = cursor.ch;
-      if (changeOnCursorLine) {
-        const textStartCh = changeOnCursorLine.level + 1;
-        if (cursor.ch >= textStartCh) {
-          const delta = changeOnCursorLine.newText.length - changeOnCursorLine.oldText.length;
-          newCh = Math.max(textStartCh, cursor.ch + delta);
-        }
-      }
-
-      const totalLines = result.newContent.split("\n").length;
-      editor.setCursor({
-        line: Math.min(cursor.line, totalLines - 1),
-        ch: newCh,
-      });
-
-      // Persist to disk so the file is saved with the new content.
-      await this.app.vault.modify(file, result.newContent);
+    } finally {
+      this.applyingNumbering = false;
     }
 
-    if (result.changes.length > 0) {
-      await updateHeadingLinks(this.app, file.path, result.changes);
-    }
+    await this.app.vault.modify(file, result.newContent);
+    await updateHeadingLinks(this.app, file.path, result.changes);
   }
 
   /**
