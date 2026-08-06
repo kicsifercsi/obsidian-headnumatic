@@ -6,7 +6,7 @@ export interface FormatPart {
   digits: number;
 }
 
-export interface TechdocConfig {
+export interface HeadnumaticConfig {
   autoRefresh: boolean;
   /** Heading level at which numbering starts (1–6). Spec says > 1 is valid, but we accept 1 too. */
   firstLevel: number;

@@ -7,8 +7,8 @@ import {
   MarkdownView,
 } from "obsidian";
 
-import { parseTechdocConfig, validateTechdocRaw, TechdocConfig } from "./numbering-parser";
-import { processHeadings, readTechdocProperty, parseHeadings, diffHeadings } from "./heading-engine";
+import { parseHeadnumaticConfig, validateHeadnumaticRaw, HeadnumaticConfig } from "./numbering-parser";
+import { processHeadings, readHeadnumaticProperty, parseHeadings, diffHeadings } from "./heading-engine";
 import {
   updateHeadingLinks,
   updateLinksAfterRename,
@@ -16,9 +16,9 @@ import {
 } from "./link-updater";
 import type { HeadingEntry } from "./types";
 
-const MALFORMED_NOTICE = "Malformed settings, check techdoc-number property!";
+const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
 
-export default class TechDocHeadingNumbering extends Plugin {
+export default class HeadnumaticPlugin extends Plugin {
   /** Debounce timers keyed by file path. */
   private refreshTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
@@ -113,7 +113,7 @@ export default class TechDocHeadingNumbering extends Plugin {
   /** Record the current headings of `file` as the snapshot reference. */
   private async seedSnapshot(file: TFile): Promise<void> {
     try {
-      const content = await this.app.vault.read(file);
+      const content = await this.app.vault.cachedRead(file);
       this.headingSnapshots.set(file.path, parseHeadings(content));
     } catch {
       // file may be unreadable (e.g. just deleted); ignore
@@ -126,7 +126,7 @@ export default class TechDocHeadingNumbering extends Plugin {
 
   /**
    * Called on every editor-change event. Tracks the cursor line; when the
-   * cursor moves away from the `techdoc-numbering` frontmatter line, the
+   * cursor moves away from the `headnumatic-numbering` frontmatter line, the
    * settings are validated and an error notice is shown if they are malformed.
    * This fires reliably whenever the user presses Enter, types on a new line,
    * or makes any content change after leaving the settings line.
@@ -140,12 +140,12 @@ export default class TechDocHeadingNumbering extends Plugin {
 
     const content = editor.getValue();
     const lines = content.split("\n");
-    if (!/^techdoc-numbering\s*:/.test(lines[prevLine] ?? "")) return;
+    if (!/^headnumatic-numbering\s*:/.test(lines[prevLine] ?? "")) return;
 
     // Cursor just left the settings line — validate now.
-    const rawProp = readTechdocProperty(content);
+    const rawProp = readHeadnumaticProperty(content);
     if (!rawProp) return;
-    if (!validateTechdocRaw(rawProp) || !parseTechdocConfig(rawProp)) {
+    if (!validateHeadnumaticRaw(rawProp) || !parseHeadnumaticConfig(rawProp)) {
       new Notice(MALFORMED_NOTICE);
     }
   }
@@ -163,21 +163,21 @@ export default class TechDocHeadingNumbering extends Plugin {
       try {
         // Always read from the editor — it holds the latest unsaved content.
         const content = editor.getValue();
-        const rawProp = readTechdocProperty(content);
+        const rawProp = readHeadnumaticProperty(content);
         if (!rawProp) return;
 
         // Malformed-settings feedback is handled by checkSettingsOnLeave;
         // silently skip here so the auto-refresh never spams notices.
-        if (!validateTechdocRaw(rawProp)) return;
+        if (!validateHeadnumaticRaw(rawProp)) return;
 
-        const config = parseTechdocConfig(rawProp);
+        const config = parseHeadnumaticConfig(rawProp);
         if (!config?.autoRefresh) return;
 
         // Option 1: pass the cursor line so processHeadings skips it while typing.
         const cursorLine = editor.getCursor().line;
         await this.applyToEditor(editor, file, content, config, cursorLine);
       } catch (e) {
-        console.error("[TechDoc Heading Numbering] auto-refresh error:", e);
+        console.error("[HeadNumatic] auto-refresh error:", e);
       }
     }, 600);
 
@@ -196,18 +196,18 @@ export default class TechDocHeadingNumbering extends Plugin {
   private async refreshWithEditor(editor: Editor, file: TFile): Promise<void> {
     try {
       const content = editor.getValue();
-      const rawProp = readTechdocProperty(content);
+      const rawProp = readHeadnumaticProperty(content);
       if (!rawProp) {
-        new Notice("No 'techdoc-numbering' property found in this note.");
+        new Notice("No 'headnumatic-numbering' property found in this note.");
         return;
       }
 
-      if (!validateTechdocRaw(rawProp)) {
+      if (!validateHeadnumaticRaw(rawProp)) {
         new Notice(MALFORMED_NOTICE);
         return;
       }
 
-      const config = parseTechdocConfig(rawProp);
+      const config = parseHeadnumaticConfig(rawProp);
       if (!config) {
         new Notice(MALFORMED_NOTICE);
         return;
@@ -215,7 +215,7 @@ export default class TechDocHeadingNumbering extends Plugin {
 
       await this.applyToEditor(editor, file, content, config);
     } catch (e) {
-      console.error("[TechDoc Heading Numbering] refreshWithEditor error:", e);
+      console.error("[HeadNumatic] refreshWithEditor error:", e);
       new Notice("Error refreshing heading numbers. Check the console for details.");
     }
   }
@@ -230,7 +230,7 @@ export default class TechDocHeadingNumbering extends Plugin {
     editor: Editor,
     file: TFile,
     content: string,
-    config: TechdocConfig,
+    config: HeadnumaticConfig,
     skipLine?: number
   ): Promise<void> {
     const result = processHeadings(content, config, file.path, skipLine);
@@ -325,11 +325,11 @@ export default class TechDocHeadingNumbering extends Plugin {
    * (used by "refresh all").
    */
   private async applyToFile(file: TFile): Promise<void> {
-    const content = await this.app.vault.read(file);
-    const rawProp = readTechdocProperty(content);
+    const content = await this.app.vault.cachedRead(file);
+    const rawProp = readHeadnumaticProperty(content);
     if (!rawProp) return;
 
-    const config = parseTechdocConfig(rawProp);
+    const config = parseHeadnumaticConfig(rawProp);
     if (!config) return;
 
     const result = processHeadings(content, config, file.path);
@@ -339,7 +339,12 @@ export default class TechDocHeadingNumbering extends Plugin {
     const linkChanges = diffHeadings(oldHeadings, newHeadings);
 
     if (result.newContent !== content) {
-      await this.app.vault.modify(file, result.newContent);
+      // Renumber again inside process() so the atomic read-modify-save works
+      // from the on-disk content rather than writing back a stale snapshot.
+      await this.app.vault.process(
+        file,
+        (data) => processHeadings(data, config, file.path).newContent
+      );
     }
 
     if (linkChanges.length > 0) {
@@ -349,7 +354,7 @@ export default class TechDocHeadingNumbering extends Plugin {
     this.headingSnapshots.set(file.path, newHeadings);
   }
 
-  /** Refresh every note in the vault that carries the techdoc-numbering property. */
+  /** Refresh every note in the vault that carries the headnumatic-numbering property. */
   async refreshAll(): Promise<void> {
     // For the active note, prefer the editor path so changes are visible immediately.
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -367,7 +372,7 @@ export default class TechDocHeadingNumbering extends Plugin {
         }
         count++;
       } catch (e) {
-        console.error(`[TechDoc Heading Numbering] error processing ${file.path}:`, e);
+        console.error(`[HeadNumatic] error processing ${file.path}:`, e);
       }
     }
 
@@ -388,7 +393,7 @@ export default class TechDocHeadingNumbering extends Plugin {
       }
       await updateLinksAfterRename(this.app, oldPath, file.path);
     } catch (e) {
-      console.error("[TechDoc Heading Numbering] rename handler error:", e);
+      console.error("[HeadNumatic] rename handler error:", e);
     }
   }
 }

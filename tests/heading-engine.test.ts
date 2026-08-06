@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { processHeadings, parseHeadings, diffHeadings } from "../src/heading-engine";
-import { parseTechdocConfig, validateTechdocRaw } from "../src/numbering-parser";
+import { parseHeadnumaticConfig, validateHeadnumaticRaw } from "../src/numbering-parser";
 import type { HeadingEntry } from "../src/types";
 
 // Note: a comma is required between each directive. The original spec had
@@ -16,7 +16,7 @@ const FILE_PATH = "007_watever/05_blah.md";
 
 const INPUT = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW}`,
+  `headnumatic-numbering: ${CONFIG_RAW}`,
   "---",
   "# first",
   "## second",
@@ -32,7 +32,7 @@ const INPUT = [
 // prettier-ignore
 const EXPECTED_LINES = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW}`,
+  `headnumatic-numbering: ${CONFIG_RAW}`,
   "---",
   "# first",                              // level 1 < first-level(2) — untouched
   "## 007.05.01 - second",
@@ -46,7 +46,7 @@ const EXPECTED_LINES = [
 ];
 
 test("TEST 1 – heading numbering with folder prefix and overflow level", () => {
-  const config = parseTechdocConfig(CONFIG_RAW);
+  const config = parseHeadnumaticConfig(CONFIG_RAW);
   if (!config) throw new Error("config should parse without error");
   assert.strictEqual(config.firstLevel, 2);
   assert.strictEqual(config.maxLevel, 7);
@@ -91,7 +91,7 @@ const FILE_PATH_2 = "1_watever/01_blah.md";
 
 const INPUT_2 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_2}`,
+  `headnumatic-numbering: ${CONFIG_RAW_2}`,
   "---",
   "# first",
   "## second",
@@ -107,7 +107,7 @@ const INPUT_2 = [
 // prettier-ignore
 const EXPECTED_LINES_2 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_2}`,
+  `headnumatic-numbering: ${CONFIG_RAW_2}`,
   "---",
   "# first",                                  // level 1 < first-level(2) — untouched
   "## 1.01.001 - second",                     // folder prefix "1.01" from 1_watever/01_blah
@@ -121,7 +121,7 @@ const EXPECTED_LINES_2 = [
 ];
 
 test("TEST 2 – uppercase-letter format part and mixed-digit folder prefix", () => {
-  const config = parseTechdocConfig(CONFIG_RAW_2);
+  const config = parseHeadnumaticConfig(CONFIG_RAW_2);
   if (!config) throw new Error("config should parse without error");
   assert.strictEqual(config.firstLevel, 2);
   assert.strictEqual(config.maxLevel, 7);
@@ -164,7 +164,7 @@ const FILE_PATH_3 = "123_watever/001_blahblah.md";
 
 const INPUT_3 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_3}`,
+  `headnumatic-numbering: ${CONFIG_RAW_3}`,
   "---",
   "# first",
   "## second",
@@ -180,7 +180,7 @@ const INPUT_3 = [
 // prettier-ignore
 const EXPECTED_LINES_3 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_3}`,
+  `headnumatic-numbering: ${CONFIG_RAW_3}`,
   "---",
   "# 2 - first",          // first-level 1, starts at 2 per start-values
   "## 2.03 - second",     // starts at 3 per start-values → "03" (2-digit pad)
@@ -194,7 +194,7 @@ const EXPECTED_LINES_3 = [
 ];
 
 test("TEST 3 – no folder prefix, non-default start-values, lowercase-letter format", () => {
-  const config = parseTechdocConfig(CONFIG_RAW_3);
+  const config = parseHeadnumaticConfig(CONFIG_RAW_3);
   if (!config) throw new Error("config should parse without error");
   assert.strictEqual(config.firstLevel, 1);
   assert.strictEqual(config.maxLevel, 7);
@@ -239,7 +239,7 @@ const FILE_PATH_4 = "21_watever/11_blah.md";
 
 const INPUT_4 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_4}`,
+  `headnumatic-numbering: ${CONFIG_RAW_4}`,
   "---",
   "# first",
   "## second",
@@ -256,7 +256,7 @@ const INPUT_4 = [
 // prettier-ignore
 const EXPECTED_LINES_4 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_4}`,
+  `headnumatic-numbering: ${CONFIG_RAW_4}`,
   "---",
   "# first",                            // level 1 < first-level(2) — untouched
   "## 21.11.01 - second",
@@ -271,7 +271,7 @@ const EXPECTED_LINES_4 = [
 ];
 
 test("TEST 4 – mixed upper/lower letter formats with counter reset", () => {
-  const config = parseTechdocConfig(CONFIG_RAW_4);
+  const config = parseHeadnumaticConfig(CONFIG_RAW_4);
   if (!config) throw new Error("config should parse without error");
   assert.strictEqual(config.firstLevel, 2);
   assert.strictEqual(config.maxLevel, 7);
@@ -315,7 +315,7 @@ const FILE_PATH_5 = "007_watever/05_blah.md";
 
 const INPUT_5 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_5}`,
+  `headnumatic-numbering: ${CONFIG_RAW_5}`,
   "---",
   "# first",
   "## second",
@@ -327,7 +327,7 @@ const INPUT_5 = [
 // prettier-ignore
 const EXPECTED_LINES_5 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_5}`,
+  `headnumatic-numbering: ${CONFIG_RAW_5}`,
   "---",
   "# first",                       // level 1 < first-level(2) — untouched
   "## 007.05.01 - second",
@@ -337,7 +337,7 @@ const EXPECTED_LINES_5 = [
 ];
 
 test("TEST 5 – headings beyond max-level are left unchanged", () => {
-  const config = parseTechdocConfig(CONFIG_RAW_5);
+  const config = parseHeadnumaticConfig(CONFIG_RAW_5);
   if (!config) throw new Error("config should parse without error");
   assert.strictEqual(config.firstLevel, 2);
   assert.strictEqual(config.maxLevel, 3);
@@ -366,7 +366,7 @@ test("TEST 5 – headings beyond max-level are left unchanged", () => {
 // TEST 6 uses the malformed config string from the spec — the comma between
 // "format" and "start-values" is intentionally missing.  The purpose of the
 // test is twofold:
-//   1. Assert that validateTechdocRaw catches it (returns false) so the plugin
+//   1. Assert that validateHeadnumaticRaw catches it (returns false) so the plugin
 //      shows an error notice instead of silently producing wrong output.
 //   2. Document the wrong output the parser would produce if validation were
 //      bypassed: "01 start-values ?" is not a valid format segment so it is
@@ -379,7 +379,7 @@ const FILE_PATH_6 = "mainb/blah.md";
 
 const INPUT_6 = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_6}`,
+  `headnumatic-numbering: ${CONFIG_RAW_6}`,
   "---",
   "# first",
   "## one",
@@ -399,7 +399,7 @@ const INPUT_6 = [
 // prettier-ignore
 const EXPECTED_LINES_6_BYPASSED = [
   "---",
-  `techdoc-numbering: ${CONFIG_RAW_6}`,
+  `headnumatic-numbering: ${CONFIG_RAW_6}`,
   "---",
   "# first",
   "## 01 - one",
@@ -412,19 +412,19 @@ const EXPECTED_LINES_6_BYPASSED = [
   "#### 03.02.2 - threetwotwo",          // wrong: "2" instead of "02"
 ];
 
-test("TEST 6 – malformed config (missing comma) is caught by validateTechdocRaw", () => {
+test("TEST 6 – malformed config (missing comma) is caught by validateHeadnumaticRaw", () => {
   // Primary assertion: the validator must reject this config.
   assert.strictEqual(
-    validateTechdocRaw(CONFIG_RAW_6),
+    validateHeadnumaticRaw(CONFIG_RAW_6),
     false,
     "missing comma between format and start-values should fail validation"
   );
 
   // Secondary: document the broken parse result when validation is bypassed.
-  // parseTechdocConfig still returns a non-null config (it does not detect the
+  // parseHeadnumaticConfig still returns a non-null config (it does not detect the
   // missing comma), but the format parts are wrong.
-  const config = parseTechdocConfig(CONFIG_RAW_6);
-  if (!config) throw new Error("parseTechdocConfig unexpectedly returned null");
+  const config = parseHeadnumaticConfig(CONFIG_RAW_6);
+  if (!config) throw new Error("parseHeadnumaticConfig unexpectedly returned null");
 
   // The "01 start-values ?" segment is dropped; the three "1" trailing segments
   // become {plain,1} parts, giving only 2 {zeros,2} parts instead of 3.
@@ -455,7 +455,7 @@ test("TEST 6 – malformed config (missing comma) is caught by validateTechdocRa
 
 /** Parse headings from a body (frontmatter is prepended for realism). */
 function headings(body: string[]): HeadingEntry[] {
-  return parseHeadings(["---", "techdoc-numbering: x", "---", ...body].join("\n"));
+  return parseHeadings(["---", "headnumatic-numbering: x", "---", ...body].join("\n"));
 }
 
 /** Collapse a diff to [oldText, newText] pairs for easy assertions. */

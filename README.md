@@ -32,6 +32,8 @@ vault/
 - A *note* (subchapter) name follows the same convention (e.g. `001_Overview.md`).
 - A chapter folder may contain sub-folders; in that case the chapter folder itself should contain no notes.
 
+This layout only matters for the `?` folder-prefix format segment. Everything else works in any vault.
+
 ---
 
 ## Installation
@@ -40,8 +42,8 @@ vault/
 
 1. Build the plugin (see [Building](#building)).
 2. Copy the contents of `build-output/` into your vault's plugin directory:  
-   `<vault>/.obsidian/plugins/obsidian-techdoc-heading-numbering/`
-3. In Obsidian → *Settings → Community plugins*, enable **TechDoc Heading Numbering**.
+   `<vault>/.obsidian/plugins/headnumatic/`
+3. In Obsidian → *Settings → Community plugins*, enable **HeadNumatic**.
 
 ### From the Community Plugin Registry
 
@@ -51,11 +53,13 @@ Once published, search for **HeadNumatic** in *Settings → Community plugins �
 
 ## Configuration (per-note)
 
-All configuration lives in the note's YAML frontmatter under the key `techdoc-numbering`. The value is a comma-separated list of directives.
+There is no settings panel. All configuration lives in the note's YAML frontmatter under the key `headnumatic-numbering`, and applies only to that note. A note without this property is never touched.
+
+The value is a comma-separated list of directives:
 
 ```yaml
 ---
-techdoc-numbering: auto-refresh, first-level 2, max-level 4, format ?.001.a.A, start-values ?.1.a.A
+headnumatic-numbering: auto-refresh, first-level 2, max-level 4, format ?.001.a.A, start-values ?.1.a.A
 ---
 ```
 
@@ -63,27 +67,45 @@ techdoc-numbering: auto-refresh, first-level 2, max-level 4, format ?.001.a.A, s
 
 | Directive | Description |
 |-----------|-------------|
-| `auto-refresh` | When present, heading numbers are updated automatically whenever the note is edited (debounced 600 ms). All vault links pointing to changed headings are updated too. |
-| `first-level <n>` | First heading level (`##` = 2, `###` = 3 …) that receives a number. Must be ≥ 2. Default: `1`. |
-| `max-level <n>` | Last heading level that receives a number (inclusive). Range 1–6. Default: `6`. |
+| `auto-refresh` | When present, heading numbers are updated automatically whenever the note is edited (debounced 600 ms). Vault links pointing to changed headings are updated too. Without it, only the manual commands renumber the note. |
+| `first-level <n>` | First heading level (`##` = 2, `###` = 3 …) that receives a number. Accepted range 1–6; a value outside that range is ignored and the default is kept. Default: `1`. |
+| `max-level <n>` | Last heading level that receives a number (inclusive). Must be ≥ 1; values above 6 have no additional effect since Markdown stops at `######`. Default: `6`. |
 | `format <value>` | **Required.** Defines the numbering format for each level (see below). |
 | `start-values <value>` | Optional starting value for each level's counter (same structure as `format`). |
 
-### Format Syntax
+Directives may appear in any order, and all except `format` may be omitted.
+
+### How the value is validated
+
+The property is parsed strictly, and the whole note is skipped if anything does not fit:
+
+- Directives are split on commas. Every token must be exactly one of the five forms above — an unrecognised or malformed token invalidates the entire value.
+- Each directive uses exactly one space between the name and its value.
+- `format` and `start-values` values may not contain spaces. This is what catches a **missing comma**: in `format ?.001 start-values ?.1` the space makes the `format` token invalid, so the mistake is reported instead of being silently half-applied.
+- A `format` directive must be present.
+- `first-level` may not be greater than `max-level`.
+
+When the settings are malformed, the notice **"Malformed settings, check headnumatic-numbering property!"** is shown the moment the cursor leaves the `headnumatic-numbering:` line — not on every keystroke, so the note can be edited in peace. Auto-refresh itself stays silent and simply does nothing until the value is valid again.
+
+Note that within a valid `format` value, segments that match none of the patterns below are ignored rather than reported.
+
+---
+
+## Format Syntax
 
 The format string uses `.` as a separator. Each segment describes how one level is formatted:
 
 | Segment | Meaning | Example output |
 |---------|---------|----------------|
-| `?` | Prefix derived from the containing folder names (only valid at position 0). | `001.002` |
+| `?` | Prefix derived from the containing folder names and the note's filename. Always rendered first, wherever it appears in the string. | `001.002` |
 | `001` (multiple digits) | Zero-padded integer, padded to the segment's digit count. | `001`, `042` |
 | `1` (single digit) | Plain integer, no padding. | `1`, `42` |
-| `a` | Lowercase letter (`a`…`z`, then wraps). | `a`, `z` |
-| `A` | Uppercase letter (`A`…`Z`, then wraps). | `A`, `Z` |
+| `a` | Lowercase letter (`a`…`z`, wrapping back to `a` after 26). | `a`, `z` |
+| `A` | Uppercase letter (`A`…`Z`, wrapping back to `A` after 26). | `A`, `Z` |
 
-The segment positions (after the optional `?`) map 1:1 to heading levels starting at `first-level`.
+The segment positions (after the optional `?`) map 1:1 to heading levels starting at `first-level`. If `max-level` implies more levels than the format lists, the surplus levels fall back to plain integers.
 
-#### Example with folder prefix (`?`)
+### Example with folder prefix (`?`)
 
 Note located at `001_Chapter/002_Section/003_Note.md`:
 
@@ -101,9 +123,9 @@ max-level 5
 | `##### Step` | `##### 001.002.003.001.a.A.1 - Step` |
 
 The `?` prefix (`001.002.003`) comes from the two containing folders **and the note's own filename**.  
-Any segment (folder or filename) that does *not* start with `<digits>_` is omitted from the prefix.
+Any segment (folder or filename) that does *not* start with `<digits>_` is omitted from the prefix. If no segment qualifies, the prefix is empty and is left out entirely.
 
-#### Example without folder prefix
+### Example without folder prefix
 
 Same note, format changed to `001.a.A.1` (no `?.`):
 
@@ -122,7 +144,19 @@ Without `?`, the folder/note numbers are not included. Dots still separate each 
 start-values ?.1.c.D.4
 ```
 
-Sets the counter for each level to begin at the specified value. The `?` placeholder keeps alignment with the format; use the same letter/number notation as the format.
+Sets the counter for each level to begin at the specified value. The `?` placeholder keeps alignment with the format and is otherwise ignored; use the same letter/number notation as the format. With the example above, the first `##` is numbered `001`, the first `###` under it starts at `c`, the first `####` at `D`, and the first `#####` at `4`.
+
+A start value that does not match its level's format type (e.g. `c` where a number is expected) falls back to `1`. Levels not covered by the string also start at `1`.
+
+---
+
+## How Numbering Is Applied
+
+- **Heading format.** The canonical output is `<hashes> <number> - <title>`. On every refresh an existing number is stripped and recomputed, so numbers never accumulate. The older `<number> <title>` form (without the ` - ` separator) is also recognised and converted on the next refresh.
+- **What counts as a heading.** A line matching `#` to `######` followed by a single space and a non-empty title. Frontmatter and fenced code blocks (``` and ~~~) are skipped.
+- **Counters.** Each numbered heading increments its own level's counter and resets all deeper counters to their start values.
+- **Levels outside the range.** Headings shallower than `first-level` or deeper than `max-level` are left exactly as they are and do not affect any counter.
+- **Titles are never rewritten.** Only the number in front of the title changes.
 
 ---
 
@@ -130,16 +164,27 @@ Sets the counter for each level to begin at the specified value. The `?` placeho
 
 | Command | Description |
 |---------|-------------|
-| **Refresh heading numbers in current note** | Renumber all eligible headings in the active note and update all links pointing to headings that changed. |
-| **Refresh heading numbers in all notes** | Same as above, applied to every note in the vault that has the `techdoc-numbering` property. |
+| **Refresh heading numbers in current note** | Renumber all eligible headings in the active note and update all links pointing to headings that changed. Reports if the note has no `headnumatic-numbering` property or the property is malformed. |
+| **Refresh heading numbers in all notes** | Same as above, applied to every note in the vault. Notes without the property are skipped. |
+
+---
+
+## Auto-Refresh
+
+With `auto-refresh` in the property, editing the note schedules a renumber 600 ms after you stop typing. Two details make this unobtrusive:
+
+- **The line the cursor is on is left alone.** Its number is still reserved, so the headings below stay correct, and the line is numbered as soon as the cursor moves away. This means a heading you are in the middle of typing is not rewritten under you.
+- **The cursor keeps its place.** Changed lines are patched individually rather than by replacing the whole document, and the cursor position is restored afterwards, so renumbering never scrolls or jumps the editor.
+
+Programmatic edits made by the plugin do not re-trigger auto-refresh.
 
 ---
 
 ## Link Updating
 
-### On heading renumber
+### On heading renumber or rename
 
-When heading text changes (because a new number was added, or an existing number changed), all wikilinks and Markdown links in the vault that point to the old heading text are updated automatically.
+When a heading's text changes — because a number was added, an existing number changed, **or the title itself was edited** — every wikilink and Markdown link in the vault that pointed at the old heading text is rewritten.
 
 Supported link forms:
 
@@ -150,11 +195,26 @@ Supported link forms:
 [label](Note#001.002.003.001%20-%20Old%20Heading)
 ```
 
+The note part of a link may be a basename or a full path; it is resolved through Obsidian's own link resolver, so only links that genuinely point at the changed note are touched. Headings in Markdown-style links are URL-encoded when written back.
+
+To know what the links currently point to, the plugin keeps an in-memory snapshot of each note's headings, taken when the note is opened and refreshed after each successful update. The new headings are matched against that snapshot by their title (ignoring numbering), so inserting or deleting a heading in the middle of a note does not misalign the rest — and a pure title rename is detected as well as a renumbering.
+
+Links in the note being edited are rewritten in the editor buffer itself, so unsaved content never overwrites them.
+
 ### On file / folder rename
 
-When any file or folder is renamed, every note in the vault is scanned and links referencing the old name/path are updated to the new name/path.
+When any file or folder is renamed, every note in the vault is scanned and links referencing the old name/path are updated to the new one.
 
 > **Note:** Obsidian also performs link updates natively when *Automatically update internal links* is enabled. The plugin's rename handler provides an additional safety net and is especially useful when Obsidian's built-in feature is disabled.
+
+---
+
+## Known Limitations
+
+- Every link update scans and reads all Markdown files in the vault. On very large vaults with `auto-refresh` enabled this is noticeable.
+- **Refresh heading numbers in all notes** reports the total number of Markdown files scanned, not the number of notes actually renumbered. If the active note has no `headnumatic-numbering` property, it also shows the "no property found" notice.
+- Fenced code blocks are tracked with a simple open/close toggle, so an unbalanced fence inside a note can cause headings after it to be skipped.
+- Headings are matched only in the `# Title` form; Setext-style headings (underlined with `===` or `---`) are not numbered.
 
 ---
 
@@ -183,6 +243,22 @@ chmod +x build   # first time only
 ```
 
 The `build-output/` directory is ready to be dropped into an Obsidian vault's plugin folder.
+
+Pushing a tag triggers the GitHub Actions workflow, which builds and creates a release with the same artifacts.
+
+### Tests
+
+```bash
+npm test     # or: ./runtest
+```
+
+The suite covers the numbering engine (folder prefixes, letter formats, start values, level cut-offs, malformed-config detection) and the heading-diff logic used for link updates.
+
+---
+
+## Migrating from `techdoc-numbering`
+
+The frontmatter key was previously `techdoc-numbering`. It is no longer recognised — rename it to `headnumatic-numbering` in each note. A note still using the old key is silently skipped, with no notice shown.
 
 ---
 

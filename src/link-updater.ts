@@ -39,15 +39,21 @@ export async function updateHeadingLinks(
 
   const files = app.vault.getMarkdownFiles();
 
+  const rewrite = (data: string) =>
+    rewriteHeadingLinksInContent(data, targetFile, changeMap, app);
+
   for (const file of files) {
     if (skipPath && file.path === skipPath) continue;
 
-    const content = await app.vault.read(file);
-    const updated = rewriteHeadingLinksInContent(content, targetFile, changeMap, app);
+    // Pre-check against the cache so untouched notes are skipped: process()
+    // saves unconditionally, and writing every note in the vault on each
+    // update would churn mtimes and fire a modify event per file.
+    const content = await app.vault.cachedRead(file);
+    if (rewrite(content) === content) continue;
 
-    if (updated !== content) {
-      await app.vault.modify(file, updated);
-    }
+    // Re-run the rewrite inside process() so the write is an atomic
+    // read-modify-save against whatever is on disk at that moment.
+    await app.vault.process(file, rewrite);
   }
 }
 
@@ -106,7 +112,7 @@ function replaceHeadingInLinks(
   content = content.replace(
     mdRe,
     (match, linkOpen, notePart, _heading, close) => {
-      if (!refersToFile(decodeURIComponent(notePart).trim(), targetFile, app))
+      if (!refersToFile(safeDecodeURIComponent(notePart).trim(), targetFile, app))
         return match;
       return `${linkOpen}${notePart}#${encodeURIComponent(newHeadingEsc)}${close}`;
     }
@@ -154,22 +160,21 @@ export async function updateLinksAfterRename(
   const isFolder = isPathFolder(app, newPath);
   const files = app.vault.getMarkdownFiles();
 
+  const rewrite = (data: string) =>
+    isFolder
+      ? rewriteLinksForFolderRename(data, oldPath, newPath)
+      : rewriteLinksForFileRename(data, oldPath, newPath);
+
   for (const file of files) {
     // Do not touch the renamed file itself if it's a note.
     if (file.path === newPath) continue;
 
-    const content = await app.vault.read(file);
-    let updated: string;
+    // See updateHeadingLinks: pre-check keeps process() from rewriting notes
+    // that contain no matching link.
+    const content = await app.vault.cachedRead(file);
+    if (rewrite(content) === content) continue;
 
-    if (isFolder) {
-      updated = rewriteLinksForFolderRename(content, oldPath, newPath);
-    } else {
-      updated = rewriteLinksForFileRename(content, oldPath, newPath);
-    }
-
-    if (updated !== content) {
-      await app.vault.modify(file, updated);
-    }
+    await app.vault.process(file, rewrite);
   }
 }
 
@@ -191,36 +196,45 @@ function rewriteLinksForFileRename(
   const newPathNoExt = newPath.replace(/\.md$/, "");
 
   // Wikilink (with optional heading/alias): [[Old Name]] [[Old Name#h]] [[Old Name|d]]
-  // We match both the full path form and the basename-only form.
+  // We match both the full path form and the basename-only form, and — as with
+  // markdown links — the replacement keeps whichever form was used, so a link
+  // written as [[docs/Old]] is not flattened to [[New]].  Wikilink targets are
+  // literal text, so nothing is percent-encoded here.
   content = content.replace(
     /(\[\[)([^\[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
     (match, open, ref, anchor, alias, close) => {
       const trimRef = ref.trim();
-      if (
-        trimRef === oldBasename ||
-        trimRef === oldPathNoExt ||
-        trimRef === oldPath
-      ) {
-        return `${open}${newBasename}${anchor}${alias ?? ""}${close}`;
-      }
-      return match;
+
+      let replacement: string | null = null;
+      if (trimRef === oldPath) replacement = newPath;
+      else if (trimRef === oldPathNoExt) replacement = newPathNoExt;
+      else if (trimRef === `${oldBasename}.md`) replacement = `${newBasename}.md`;
+      else if (trimRef === oldBasename) replacement = newBasename;
+
+      if (replacement === null) return match;
+      return `${open}${replacement}${anchor}${alias ?? ""}${close}`;
     }
   );
 
   // Markdown link: [text](Old%20Name.md) or [text](Old Name.md)
+  //
+  // The replacement mirrors the shape the link already had — full path or bare
+  // basename, with or without the extension — so a link written as
+  // "[x](docs/Old.md)" does not come back as "[x](New)".  Order matters: the
+  // most specific form is tested first.
   content = content.replace(
     /(\[[^\]]*\]\()([^)#]+)((?:#[^)]*)?)\)/g,
     (match, linkOpen, ref, anchor) => {
-      const decoded = decodeURIComponent(ref).trim();
-      if (
-        decoded === oldBasename ||
-        decoded === oldPathNoExt ||
-        decoded === oldPath ||
-        decoded === `${oldBasename}.md`
-      ) {
-        return `${linkOpen}${encodeURIComponent(newBasename)}${anchor})`;
-      }
-      return match;
+      const decoded = safeDecodeURIComponent(ref).trim();
+
+      let replacement: string | null = null;
+      if (decoded === oldPath) replacement = newPath;
+      else if (decoded === oldPathNoExt) replacement = newPathNoExt;
+      else if (decoded === `${oldBasename}.md`) replacement = `${newBasename}.md`;
+      else if (decoded === oldBasename) replacement = newBasename;
+
+      if (replacement === null) return match;
+      return `${linkOpen}${encodePath(replacement)}${anchor})`;
     }
   );
 
@@ -255,10 +269,10 @@ function rewriteLinksForFolderRename(
   content = content.replace(
     /(\[[^\]]*\]\()([^)#]+)((?:#[^)]*)?)\)/g,
     (match, linkOpen, ref, anchor) => {
-      const decoded = decodeURIComponent(ref);
+      const decoded = safeDecodeURIComponent(ref);
       if (decoded.startsWith(oldPrefix)) {
         const newRef = newPrefix + decoded.slice(oldPrefix.length);
-        return `${linkOpen}${encodeURIComponent(newRef)}${anchor})`;
+        return `${linkOpen}${encodePath(newRef)}${anchor})`;
       }
       return match;
     }
@@ -270,6 +284,33 @@ function rewriteLinksForFolderRename(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * decodeURIComponent() that never throws.
+ *
+ * Link targets are hand-written text and may contain a bare "%" that is not a
+ * valid escape sequence (e.g. "[report](50%_done.md)").  decodeURIComponent()
+ * raises a URIError on those, which would abort the whole vault scan and leave
+ * the remaining notes un-updated.  An undecodable target is used as-is instead.
+ */
+function safeDecodeURIComponent(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Percent-encode a vault path for use inside a markdown link target.
+ *
+ * Each path segment is encoded on its own so the "/" separators survive —
+ * encodeURIComponent() on the whole path would turn them into "%2F" and break
+ * every multi-level link.
+ */
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
 
 function basenameWithoutExt(path: string): string {
   const base = path.split("/").pop() ?? path;

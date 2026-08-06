@@ -1,6 +1,6 @@
-import type { FormatPart, FormatPartType, TechdocConfig } from "./types";
+import type { FormatPart, FormatPartType, HeadnumaticConfig } from "./types";
 
-export type { TechdocConfig };
+export type { HeadnumaticConfig };
 
 /**
  * Returns true when every comma-separated token in the raw property value is a
@@ -10,7 +10,7 @@ export type { TechdocConfig };
  * "format ?.001 start-values ?.1" fails because a valid format value never
  * contains whitespace — the space signals a swallowed token).
  */
-export function validateTechdocRaw(rawValue: unknown): boolean {
+export function validateHeadnumaticRaw(rawValue: unknown): boolean {
   if (!rawValue) return false;
   const raw = Array.isArray(rawValue) ? rawValue.join(", ") : String(rawValue);
   const tokens = raw.split(/,\s*/);
@@ -30,19 +30,19 @@ export function validateTechdocRaw(rawValue: unknown): boolean {
 }
 
 /**
- * Parse the value of the `techdoc-numbering` frontmatter property.
+ * Parse the value of the `headnumatic-numbering` frontmatter property.
  * Returns null when the value is missing or no format is specified.
  *
  * Expected value format (comma-separated tokens):
  *   auto-refresh, first-level 3, max-level 6, format ?.001.a.A.1, start-values ?.1.c.D.4
  */
-export function parseTechdocConfig(rawValue: unknown): TechdocConfig | null {
+export function parseHeadnumaticConfig(rawValue: unknown): HeadnumaticConfig | null {
   if (!rawValue) return null;
 
   // Obsidian may give us the YAML value as an array when the user writes a YAML list.
   const raw = Array.isArray(rawValue) ? rawValue.join(", ") : String(rawValue);
 
-  const config: TechdocConfig = {
+  const config: HeadnumaticConfig = {
     autoRefresh: false,
     firstLevel: 1,
     maxLevel: 6,
