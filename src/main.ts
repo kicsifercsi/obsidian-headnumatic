@@ -234,7 +234,7 @@ export default class HeadnumaticPlugin extends Plugin {
   /**
    * Refresh heading numbers in the currently open editor.
    * Reads content from the editor itself (latest unsaved state) and writes
-   * back via editor.setValue() for an immediate visual update.
+   * back through the Editor API for an immediate visual update.
    */
   private async refreshWithEditor(editor: Editor, file: TFile): Promise<void> {
     try {
@@ -265,9 +265,14 @@ export default class HeadnumaticPlugin extends Plugin {
 
   /**
    * Apply computed heading numbering to an open editor.
+   *
    * Each changed line is updated with editor.replaceRange() so that
    * CodeMirror's own change-mapping keeps the cursor in the right place —
    * no manual cursor save/restore is needed.
+   *
+   * The open file is written through the Editor API only; Obsidian persists
+   * the buffer itself. Links in other notes still go through the vault, but
+   * this file is excluded from that pass (see the skipPath argument below).
    */
   private async applyToEditor(
     editor: Editor,
@@ -313,18 +318,14 @@ export default class HeadnumaticPlugin extends Plugin {
       this.applyingNumbering = false;
     }
 
-    // CM6's change mapping has already placed the cursor correctly after the
-    // replaceRange calls above.  vault.modify() persists the changes to disk,
-    // but Obsidian may respond by calling editor.setValue() internally to
-    // reconcile the file with the editor — which resets the cursor via an
-    // absolute-offset mapping that can land on a different line when headings
-    // above the cursor changed length.  Saving the cursor now and restoring it
-    // on the next tick (after Obsidian's potential reload) fixes this.
-    const savedCursor = editor.getCursor();
+    // Deliberately no vault.modify() here: the editor buffer is the only
+    // writer for the open file, and Obsidian persists it on its own. Writing
+    // the same bytes through the vault made Obsidian call editor.setValue()
+    // to reconcile, which re-seeks the cursor by absolute offset and lands on
+    // the wrong line whenever headings above it changed width — the reason
+    // this function used to save and restore the cursor on a later tick. CM6
+    // maps the cursor through the replaceRange calls above by itself.
 
-    if (finalContent !== content) {
-      await this.app.vault.modify(file, finalContent);
-    }
     // Update links in every OTHER note; the active note was handled above.
     // With the setting off, the self-links written above are all we touch.
     if (this.settings.updateAllLinksOnRenumber) {
@@ -333,15 +334,6 @@ export default class HeadnumaticPlugin extends Plugin {
 
     // The reconcile is complete and consistent — refresh the snapshot.
     this.headingSnapshots.set(file.path, newHeadings);
-
-    // Restore cursor after any editor reload triggered by vault.modify.
-    setTimeout(() => {
-      try {
-        editor.setCursor(savedCursor);
-      } catch {
-        // editor may have been closed; ignore
-      }
-    }, 0);
   }
 
   /**
