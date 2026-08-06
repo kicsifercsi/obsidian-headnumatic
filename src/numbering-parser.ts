@@ -1,4 +1,4 @@
-import type { FormatPart, FormatPartType, HeadnumaticConfig } from "./types";
+import type { FormatPart, HeadnumaticConfig } from "./types";
 
 export type { HeadnumaticConfig };
 

@@ -10,29 +10,27 @@ import { updateHeadingLinks, updateLinksAfterRename } from "../src/link-updater"
 //
 // `files` maps path → content and doubles as the vault contents; the iteration
 // order of its keys is the order getMarkdownFiles() returns, which lets a test
-// place a note deliberately *before* another one.  `folders` lists paths that
-// should resolve to a folder (an object without an `extension` property, which
-// is how the code distinguishes TFolder from TFile).
+// place a note deliberately *before* another one.
+//
+// Nothing here stubs getAbstractFileByPath: the rewriters take the TFile and
+// the folder/file distinction from their caller rather than re-resolving paths.
 // ---------------------------------------------------------------------------
-function makeApp(files: Record<string, string>, folders: string[] = []) {
-  const store = { ...files };
-  const writes: string[] = [];
 
-  const asFile = (path: string) => ({
+/** A stand-in for the TFile fields the rewriters actually read. */
+const fileRef = (path: string) =>
+  ({
     path,
     basename: path.split("/").pop()!.replace(/\.md$/, ""),
     extension: "md",
-  });
+  }) as any;
+
+function makeApp(files: Record<string, string>) {
+  const store = { ...files };
+  const writes: string[] = [];
 
   const app = {
     vault: {
-      getAbstractFileByPath: (p: string) =>
-        folders.includes(p)
-          ? ({ path: p } as any)
-          : store[p] !== undefined
-            ? (asFile(p) as any)
-            : null,
-      getMarkdownFiles: () => Object.keys(store).map(asFile),
+      getMarkdownFiles: () => Object.keys(store).map(fileRef),
       read: async (f: any) => store[f.path],
       cachedRead: async (f: any) => store[f.path],
       modify: async (f: any, c: string) => {
@@ -70,11 +68,10 @@ test("TEST 1 – folder rename keeps '/' separators in markdown links", async ()
         "[two levels](001_Old/002_Sub/Note.md)",
         "[three levels](001_Old/002_Sub/003_Deep/Note.md)",
       ].join("\n"),
-    },
-    ["001_New"]
+    }
   );
 
-  await updateLinksAfterRename(app, "001_Old", "001_New");
+  await updateLinksAfterRename(app, "001_Old", "001_New", true);
   const out = store["index.md"];
 
   assert.ok(!out.includes("%2F"), "path separators must not be percent-encoded");
@@ -85,11 +82,10 @@ test("TEST 1 – folder rename keeps '/' separators in markdown links", async ()
 
 test("TEST 2 – folder rename preserves existing escapes without double-encoding", async () => {
   const { app, store } = makeApp(
-    { "index.md": "[spaced](001_Old/002_Sub/My%20Note.md)" },
-    ["001_New"]
+    { "index.md": "[spaced](001_Old/002_Sub/My%20Note.md)" }
   );
 
-  await updateLinksAfterRename(app, "001_Old", "001_New");
+  await updateLinksAfterRename(app, "001_Old", "001_New", true);
 
   // The space stays a single %20 — not re-encoded to %2520 — and the separators
   // stay literal.
@@ -105,11 +101,10 @@ test("TEST 3 – folder rename rewrites wikilinks and leaves unrelated links alo
         "[unrelated](Other/Note.md)",
         "[[Other/Note]]",
       ].join("\n"),
-    },
-    ["001_New"]
+    }
   );
 
-  await updateLinksAfterRename(app, "001_Old", "001_New");
+  await updateLinksAfterRename(app, "001_Old", "001_New", true);
   const out = store["index.md"];
 
   assert.ok(out.includes("[[001_New/002_Sub/Note]]"));
@@ -135,7 +130,7 @@ test("TEST 4 – file rename preserves the extension in markdown links", async (
     ].join("\n"),
   });
 
-  await updateLinksAfterRename(app, "Old Name.md", "New Name.md");
+  await updateLinksAfterRename(app, "Old Name.md", "New Name.md", false);
 
   assert.equal(
     store["index.md"],
@@ -156,7 +151,7 @@ test("TEST 5 – file rename preserves the directory path in markdown links", as
     ].join("\n"),
   });
 
-  await updateLinksAfterRename(app, "docs/001_Old.md", "docs/002_New.md");
+  await updateLinksAfterRename(app, "docs/001_Old.md", "docs/002_New.md", false);
   const out = store["index.md"];
 
   assert.ok(!out.includes("%2F"), "path separators must not be percent-encoded");
@@ -168,7 +163,7 @@ test("TEST 5 – file rename preserves the directory path in markdown links", as
 test("TEST 6 – file rename preserves a non-markdown extension", async () => {
   const { app, store } = makeApp({ "index.md": "![shot](assets/old.png)" });
 
-  await updateLinksAfterRename(app, "assets/old.png", "assets/new.png");
+  await updateLinksAfterRename(app, "assets/old.png", "assets/new.png", false);
 
   assert.equal(store["index.md"], "![shot](assets/new.png)");
 });
@@ -185,7 +180,7 @@ test("TEST 7 – file rename preserves the path form in wikilinks", async () => 
     ].join("\n"),
   });
 
-  await updateLinksAfterRename(app, "docs/001_Old.md", "docs/002_New.md");
+  await updateLinksAfterRename(app, "docs/001_Old.md", "docs/002_New.md", false);
 
   assert.equal(
     store["index.md"],
@@ -215,11 +210,10 @@ test("TEST 8 – folder rename survives a bare '%' in a link target", async () =
     {
       "a-bad.md": ["[report](50%_done.md)", "[coverage](100%.md)"].join("\n"),
       "b-good.md": "[good link](001_Old/002_Sub/Note.md)",
-    },
-    ["001_New"]
+    }
   );
 
-  await updateLinksAfterRename(app, "001_Old", "001_New");
+  await updateLinksAfterRename(app, "001_Old", "001_New", true);
 
   assert.equal(
     store["a-bad.md"],
@@ -239,7 +233,7 @@ test("TEST 9 – file rename survives a bare '%' in a link target", async () => 
     "b-good.md": "[good link](Old Name.md)",
   });
 
-  await updateLinksAfterRename(app, "Old Name.md", "New Name.md");
+  await updateLinksAfterRename(app, "Old Name.md", "New Name.md", false);
 
   assert.equal(store["a-bad.md"], "[report](50%_done.md)");
   assert.ok(
@@ -257,7 +251,7 @@ test("TEST 10 – heading-link updates survive a bare '%' in a link target", asy
     "Target.md": "## 001 - Old Heading",
   });
 
-  await updateHeadingLinks(app, "Target.md", [
+  await updateHeadingLinks(app, fileRef("Target.md"), [
     { oldText: "Old Heading", newText: "001 - Old Heading", level: 2, line: 0 },
   ]);
 
@@ -284,11 +278,10 @@ test("TEST 11 – only notes containing a matching link are written", async () =
       "no-links.md": "# Just a heading\n\nSome prose.",
       "other-links.md": "[elsewhere](Other/Note.md)\n[[Unrelated]]",
       "has-link.md": "[target](001_Old/002_Sub/Note.md)",
-    },
-    ["001_New"]
+    }
   );
 
-  await updateLinksAfterRename(app, "001_Old", "001_New");
+  await updateLinksAfterRename(app, "001_Old", "001_New", true);
 
   assert.deepEqual(writes, ["has-link.md"], "untouched notes must not be saved");
   assert.equal(store["no-links.md"], "# Just a heading\n\nSome prose.");
@@ -303,7 +296,7 @@ test("TEST 12 – heading-link updates only write notes that reference the headi
     "Target.md": "## 001 - Old Heading",
   });
 
-  await updateHeadingLinks(app, "Target.md", [
+  await updateHeadingLinks(app, fileRef("Target.md"), [
     { oldText: "Old Heading", newText: "001 - Old Heading", level: 2, line: 0 },
   ]);
 

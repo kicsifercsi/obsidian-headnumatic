@@ -4,17 +4,54 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # headnumatic – release build script
 #
+# Usage: ./build <Y|N>
+#
 # Steps:
 #   1. Read current version from manifest.json
 #   2. Increment the patch version component
 #   3. Write the new version back to manifest.json and package.json
-#   4. Type-check TypeScript (no emit)
-#   5. Bundle with esbuild (production)
-#   6. Copy distributable files to ./build-output/
+#   4. Record the new version in versions.json (only when the argument is Y)
+#   5. Type-check TypeScript (no emit)
+#   6. Bundle with esbuild (production)
+#   7. Copy distributable files to ./build-output/
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# ── 0. Argument ──────────────────────────────────────────────────────────────
+usage() {
+  cat <<'EOF'
+Usage: ./build <Y|N>
+
+  Y   after bumping manifest.json, add the new version to versions.json
+      (mapped to the manifest's minAppVersion, which is what Obsidian uses
+      to decide the newest release a given app version may install)
+  N   leave versions.json untouched
+
+The argument is required so the versions.json update is always a deliberate
+choice. Either way the script bumps the patch version in manifest.json and
+package.json, type-checks, bundles with esbuild, and fills build-output/.
+EOF
+}
+
+UPDATE_VERSIONS="${1:-}"
+
+if [[ -z "$UPDATE_VERSIONS" ]]; then
+  usage
+  exit 1
+fi
+
+case "$UPDATE_VERSIONS" in
+  Y|y) UPDATE_VERSIONS="Y" ;;
+  N|n) UPDATE_VERSIONS="N" ;;
+  *)
+    echo "Unrecognised argument: '${UPDATE_VERSIONS}'" >&2
+    echo "" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
 
 # ── 1. Read version from manifest.json ──────────────────────────────────────
 CURRENT_VERSION="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('manifest.json','utf8')).version)")"
@@ -46,15 +83,29 @@ pkg.version = '${NEW_VERSION}';
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 
-# ── 4. TypeScript type-check ─────────────────────────────────────────────────
+# ── 4. versions.json (opt-in) ────────────────────────────────────────────────
+if [[ "$UPDATE_VERSIONS" == "Y" ]]; then
+  node -e "
+const fs = require('fs');
+const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+const versions = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+versions['${NEW_VERSION}'] = manifest.minAppVersion;
+fs.writeFileSync('versions.json', JSON.stringify(versions, null, 2) + '\n');
+"
+  echo "versions.json: added ${NEW_VERSION}"
+else
+  echo "versions.json: left unchanged"
+fi
+
+# ── 5. TypeScript type-check ─────────────────────────────────────────────────
 echo "Type-checking TypeScript…"
 npx tsc --noEmit --skipLibCheck
 
-# ── 5. esbuild production bundle ─────────────────────────────────────────────
+# ── 6. esbuild production bundle ─────────────────────────────────────────────
 echo "Bundling with esbuild (production)…"
 node esbuild.config.mjs production
 
-# ── 6. Assemble build-output/ ────────────────────────────────────────────────
+# ── 7. Assemble build-output/ ────────────────────────────────────────────────
 OUTPUT_DIR="build-output"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"

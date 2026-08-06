@@ -53,7 +53,7 @@ Once published, search for **HeadNumatic** in *Settings → Community plugins �
 
 ## Configuration (per-note)
 
-There is no settings panel. All configuration lives in the note's YAML frontmatter under the key `headnumatic-numbering`, and applies only to that note. A note without this property is never touched.
+Numbering is configured per note, in the note's YAML frontmatter under the key `headnumatic-numbering`, and applies only to that note. A note without this property is never touched. The only vault-wide option lives in the [plugin settings](#plugin-settings).
 
 The value is a comma-separated list of directives:
 
@@ -205,13 +205,30 @@ Links in the note being edited are rewritten in the editor buffer itself, so uns
 
 When any file or folder is renamed, every note in the vault is scanned and links referencing the old name/path are updated to the new one.
 
-> **Note:** Obsidian also performs link updates natively when *Automatically update internal links* is enabled. The plugin's rename handler provides an additional safety net and is especially useful when Obsidian's built-in feature is disabled.
+> **Note:** this is **off by default** — Obsidian performs these link updates natively when *Automatically update internal links* is enabled. The plugin's rename handler is a safety net for vaults that keep Obsidian's built-in feature disabled, and runs only while **Automatically update all links in vault (when a file or folder is renamed)** is switched on — see [Plugin Settings](#plugin-settings).
+
+---
+
+## Plugin Settings
+
+*Settings → Community plugins → HeadNumatic*
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| **Automatically update all links in vault (when header numbering changes)** | On | **On** — links pointing at a renumbered heading are rewritten across the whole vault.<br>**Off** — only the note being renumbered is updated: its own links to its own headings are fixed, since nothing else would fix them. Links in other notes keep pointing at the previous heading text. |
+| **Automatically update all links in vault (when a file or folder is renamed)** | **Off** | **On** — after any rename the whole vault is scanned and links to the old name or path are rewritten.<br>**Off** — renames are left entirely to Obsidian's built-in *Automatically update internal links*. |
+
+The two are independent.
+
+The rename switch is off by default because Obsidian already does that job: leaving it off avoids a full vault read on every rename, for no loss of function. Turn it on only if you keep Obsidian's own *Automatically update internal links* disabled — otherwise both features rewrite the same links.
+
+The renumbering switch defaults to on and has no built-in equivalent to fall back on; with it off, links elsewhere in the vault go stale until you re-enable it and run one of the refresh commands.
 
 ---
 
 ## Known Limitations
 
-- Every link update scans and reads all Markdown files in the vault. On very large vaults with `auto-refresh` enabled this is noticeable.
+- With the vault-wide settings on, every link update scans and reads all Markdown files in the vault. On very large vaults with `auto-refresh` enabled this is noticeable — the two switches in [Plugin Settings](#plugin-settings) turn it off per trigger.
 - **Refresh heading numbers in all notes** reports the total number of Markdown files scanned, not the number of notes actually renumbered. If the active note has no `headnumatic-numbering` property, it also shows the "no property found" notice.
 - Fenced code blocks are tracked with a simple open/close toggle, so an unbalanced fence inside a note can cause headings after it to be skipped.
 - Headings are matched only in the `# Title` form; Setext-style headings (underlined with `===` or `---`) are not numbered.
@@ -229,18 +246,25 @@ npm >= 9
 
 ### Release build
 
-Use the included `build` script. It:
-
-1. Reads the current version from `manifest.json` and bumps the **patch** component.
-2. Writes the new version back to `manifest.json` and `package.json`.
-3. Compiles TypeScript (type-check only, no emit).
-4. Bundles the plugin with esbuild (production mode, no source maps).
-5. Copies `main.js`, `manifest.json`, and `styles.css` (if present) into `build-output/`.
+Use the included `build` script. It takes one required argument, `Y` or `N`,
+saying whether the new version should also be recorded in `versions.json`:
 
 ```bash
 chmod +x build   # first time only
-./build
+
+./build Y        # bump, and add the new version to versions.json
+./build N        # bump, and leave versions.json alone
+./build          # prints usage and exits without changing anything
 ```
+
+Either way the script:
+
+1. Reads the current version from `manifest.json` and bumps the **patch** component.
+2. Writes the new version back to `manifest.json` and `package.json`.
+3. With `Y`, adds `"<new version>": "<minAppVersion>"` to `versions.json` — the map Obsidian uses to decide the newest release a given app version may install. Use `N` for builds you are not publishing, so the file only ever lists real releases.
+4. Compiles TypeScript (type-check only, no emit).
+5. Bundles the plugin with esbuild (production mode, no source maps).
+6. Copies `main.js`, `manifest.json`, and `styles.css` (if present) into `build-output/`.
 
 The `build-output/` directory is ready to be dropped into an Obsidian vault's plugin folder.
 
@@ -252,7 +276,7 @@ Pushing a tag triggers the GitHub Actions workflow, which builds and creates a r
 npm test     # or: ./runtest
 ```
 
-The suite covers the numbering engine (folder prefixes, letter formats, start values, level cut-offs, malformed-config detection) and the heading-diff logic used for link updates.
+The suite covers the numbering engine (folder prefixes, letter formats, start values, level cut-offs, malformed-config detection), the heading-diff logic used for link updates, and the link rewriters themselves (path and extension handling on rename, and which notes get written).
 
 ---
 

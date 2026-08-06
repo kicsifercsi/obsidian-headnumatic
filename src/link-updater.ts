@@ -1,4 +1,4 @@
-import type { App, TAbstractFile, TFile, TFolder } from "obsidian";
+import type { App, TFile } from "obsidian";
 import type { HeadingChange } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -6,15 +6,19 @@ import type { HeadingChange } from "./types";
 // ---------------------------------------------------------------------------
 
 /**
- * After the headings in `changedFilePath` have been renumbered, scan every
- * markdown note in the vault and rewrite any wikilinks or markdown links
- * that point to those headings.
+ * After the headings in `targetFile` have been renumbered, scan every markdown
+ * note in the vault and rewrite any wikilinks or markdown links that point to
+ * those headings.
  *
  * Supported link forms:
  *   [[Note#Old Heading Text]]
  *   [[Note#Old Heading Text|Display]]
  *   [[path/to/Note#Old Heading Text]]
  *   [text](Note#Old%20Heading%20Text)   (encoded or plain)
+ *
+ * The caller passes the TFile it already holds rather than a path: re-resolving
+ * a path through getAbstractFileByPath() would hand back a TAbstractFile that
+ * only an unchecked cast could turn into a TFile.
  *
  * `skipPath` lets the caller exclude a file it will update by other means — in
  * particular the currently-open note, whose self-links must be rewritten in the
@@ -23,14 +27,11 @@ import type { HeadingChange } from "./types";
  */
 export async function updateHeadingLinks(
   app: App,
-  changedFilePath: string,
+  targetFile: TFile,
   changes: HeadingChange[],
   skipPath?: string
 ): Promise<void> {
   if (changes.length === 0) return;
-
-  const targetFile = app.vault.getAbstractFileByPath(changedFilePath) as TFile | null;
-  if (!targetFile) return;
 
   // Build a map of oldText → newText for quick lookup.
   const changeMap = new Map<string, string>(
@@ -95,7 +96,7 @@ function replaceHeadingInLinks(
 
   content = content.replace(
     wikiRe,
-    (match, open, notePart, heading, alias) => {
+    (match, open, notePart, _heading, alias) => {
       if (!refersToFile(notePart.trim(), targetFile, app)) return match;
       return `${open}${notePart}#${newHeadingEsc}${alias ?? ""}]]`;
     }
@@ -151,13 +152,18 @@ function refersToFile(ref: string, targetFile: TFile, app: App): boolean {
  * Obsidian already handles this when "Automatically update internal links" is
  * enabled, but this ensures it also happens through the plugin regardless of
  * that setting.
+ *
+ * `isFolder` is decided by the caller, which receives the renamed
+ * TAbstractFile from the vault event and can test it with `instanceof TFolder`
+ * — a real type guard, unlike probing a re-resolved path for an `extension`
+ * property.
  */
 export async function updateLinksAfterRename(
   app: App,
   oldPath: string,
-  newPath: string
+  newPath: string,
+  isFolder: boolean
 ): Promise<void> {
-  const isFolder = isPathFolder(app, newPath);
   const files = app.vault.getMarkdownFiles();
 
   const rewrite = (data: string) =>
@@ -178,12 +184,6 @@ export async function updateLinksAfterRename(
   }
 }
 
-function isPathFolder(app: App, path: string): boolean {
-  const item = app.vault.getAbstractFileByPath(path);
-  // TFolder doesn't have an extension property.
-  return item !== null && !("extension" in item);
-}
-
 /** Rewrite links in `content` after a single file was renamed. */
 function rewriteLinksForFileRename(
   content: string,
@@ -201,7 +201,7 @@ function rewriteLinksForFileRename(
   // written as [[docs/Old]] is not flattened to [[New]].  Wikilink targets are
   // literal text, so nothing is percent-encoded here.
   content = content.replace(
-    /(\[\[)([^\[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
+    /(\[\[)([^[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
     (match, open, ref, anchor, alias, close) => {
       const trimRef = ref.trim();
 
@@ -256,7 +256,7 @@ function rewriteLinksForFolderRename(
 
   // Wikilinks that embed the full path.
   content = content.replace(
-    /(\[\[)([^\[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
+    /(\[\[)([^[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
     (match, open, ref, anchor, alias, close) => {
       if (ref.startsWith(oldPrefix)) {
         return `${open}${newPrefix}${ref.slice(oldPrefix.length)}${anchor}${alias ?? ""}${close}`;

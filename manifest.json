@@ -1,9 +1,9 @@
 {
   "id": "headnumatic",
   "name": "HeadNumatic",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "minAppVersion": "1.1.1",
-  "description": "Automatically number headings in Obsidian notes based on folder structure and configurable format.",
+  "description": "Automatically number headings in your notes based on folder structure and a configurable format.",
   "author": "kicsifercsi",
   "authorUrl": "https://github.com/kicsifercsi",
   "isDesktopOnly": false,

@@ -1,8 +1,12 @@
 import {
+  App,
   Notice,
   Plugin,
+  PluginSettingTab,
+  Setting,
   TAbstractFile,
   TFile,
+  TFolder,
   Editor,
   MarkdownView,
 } from "obsidian";
@@ -18,7 +22,35 @@ import type { HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
 
+interface HeadnumaticSettings {
+  /**
+   * Vault-wide link rewriting after headings are renumbered.
+   *
+   * When false only the note whose headings changed is touched — its own
+   * links to its own headings, which nothing else would fix. Links in other
+   * notes keep pointing at the previous heading text.
+   */
+  updateAllLinksOnRenumber: boolean;
+
+  /**
+   * Vault-wide link rewriting after a file or folder is renamed.
+   *
+   * Off by default: Obsidian already does this when "Automatically update
+   * internal links" is enabled, so the plugin's pass is a safety net that
+   * costs a full vault read on every rename. Turn it on only when Obsidian's
+   * own setting is disabled.
+   */
+  updateAllLinksOnRename: boolean;
+}
+
+const DEFAULT_SETTINGS: HeadnumaticSettings = {
+  updateAllLinksOnRenumber: true,
+  updateAllLinksOnRename: false,
+};
+
 export default class HeadnumaticPlugin extends Plugin {
+  settings: HeadnumaticSettings = { ...DEFAULT_SETTINGS };
+
   /** Debounce timers keyed by file path. */
   private refreshTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
@@ -42,6 +74,9 @@ export default class HeadnumaticPlugin extends Plugin {
   private applyingNumbering = false;
 
   async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new HeadnumaticSettingTab(this.app, this));
+
     // -----------------------------------------------------------------------
     // Commands
     // -----------------------------------------------------------------------
@@ -108,6 +143,14 @@ export default class HeadnumaticPlugin extends Plugin {
     this.refreshTimers.clear();
     this.prevCursorLines.clear();
     this.headingSnapshots.clear();
+  }
+
+  async loadSettings(): Promise<void> {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
   }
 
   /** Record the current headings of `file` as the snapshot reference. */
@@ -253,10 +296,9 @@ export default class HeadnumaticPlugin extends Plugin {
     // about to apply. Self-links must be updated in the editor buffer (not on
     // disk) or the editor's unsaved content would clobber the change.
     const changeMap = new Map(linkChanges.map((c) => [c.oldText, c.newText]));
-    const targetFile = this.app.vault.getAbstractFileByPath(file.path) as TFile;
     const finalContent = rewriteHeadingLinksInContent(
       result.newContent,
-      targetFile,
+      file,
       changeMap,
       this.app
     );
@@ -284,7 +326,10 @@ export default class HeadnumaticPlugin extends Plugin {
       await this.app.vault.modify(file, finalContent);
     }
     // Update links in every OTHER note; the active note was handled above.
-    await updateHeadingLinks(this.app, file.path, linkChanges, file.path);
+    // With the setting off, the self-links written above are all we touch.
+    if (this.settings.updateAllLinksOnRenumber) {
+      await updateHeadingLinks(this.app, file, linkChanges, file.path);
+    }
 
     // The reconcile is complete and consistent — refresh the snapshot.
     this.headingSnapshots.set(file.path, newHeadings);
@@ -338,17 +383,31 @@ export default class HeadnumaticPlugin extends Plugin {
     const newHeadings = parseHeadings(result.newContent);
     const linkChanges = diffHeadings(oldHeadings, newHeadings);
 
-    if (result.newContent !== content) {
-      // Renumber again inside process() so the atomic read-modify-save works
+    // Renumber and fix this note's links to its own headings in one write, so
+    // the note is self-consistent even when vault-wide updating is off.
+    const changeMap = new Map(linkChanges.map((c) => [c.oldText, c.newText]));
+    const finalContent = rewriteHeadingLinksInContent(
+      result.newContent,
+      file,
+      changeMap,
+      this.app
+    );
+
+    if (finalContent !== content) {
+      // Redo the work inside process() so the atomic read-modify-save works
       // from the on-disk content rather than writing back a stale snapshot.
-      await this.app.vault.process(
-        file,
-        (data) => processHeadings(data, config, file.path).newContent
+      await this.app.vault.process(file, (data) =>
+        rewriteHeadingLinksInContent(
+          processHeadings(data, config, file.path).newContent,
+          file,
+          changeMap,
+          this.app
+        )
       );
     }
 
-    if (linkChanges.length > 0) {
-      await updateHeadingLinks(this.app, file.path, linkChanges);
+    if (this.settings.updateAllLinksOnRenumber && linkChanges.length > 0) {
+      await updateHeadingLinks(this.app, file, linkChanges, file.path);
     }
 
     this.headingSnapshots.set(file.path, newHeadings);
@@ -391,9 +450,69 @@ export default class HeadnumaticPlugin extends Plugin {
         this.headingSnapshots.delete(oldPath);
         this.headingSnapshots.set(file.path, snapshot);
       }
-      await updateLinksAfterRename(this.app, oldPath, file.path);
+      // Obsidian updates links on rename itself when "Automatically update
+      // internal links" is on. Scanning the whole vault again is opt-out.
+      if (!this.settings.updateAllLinksOnRename) return;
+
+      // `file` is the renamed object handed over by the vault event, so
+      // instanceof is a real type guard here — no re-resolving a path and
+      // casting the result.
+      await updateLinksAfterRename(
+        this.app,
+        oldPath,
+        file.path,
+        file instanceof TFolder
+      );
     } catch (e) {
       console.error("[HeadNumatic] rename handler error:", e);
     }
+  }
+}
+
+class HeadnumaticSettingTab extends PluginSettingTab {
+  plugin: HeadnumaticPlugin;
+
+  constructor(app: App, plugin: HeadnumaticPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Automatically update all links in vault (when header numbering changes)")
+      .setDesc(
+        "On: links pointing to a renumbered heading are rewritten across the " +
+          "whole vault. Off: only the note being renumbered is updated — its " +
+          "own links to its own headings — and links elsewhere keep pointing " +
+          "at the previous heading text."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.updateAllLinksOnRenumber)
+          .onChange(async (value) => {
+            this.plugin.settings.updateAllLinksOnRenumber = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Automatically update all links in vault (when a file or folder is renamed)")
+      .setDesc(
+        "Off by default, because Obsidian already does this through its own " +
+          '"Automatically update internal links" setting. Turn it on only if ' +
+          "you keep that disabled: it makes the plugin read every note in the " +
+          "vault on every rename."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.updateAllLinksOnRename)
+          .onChange(async (value) => {
+            this.plugin.settings.updateAllLinksOnRename = value;
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }
