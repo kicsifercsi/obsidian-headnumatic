@@ -205,7 +205,7 @@ Links in the note being edited are rewritten in the editor buffer itself, so uns
 
 When any file or folder is renamed, every note in the vault is scanned and links referencing the old name/path are updated to the new one.
 
-> **Note:** this is **off by default** — Obsidian performs these link updates natively when *Automatically update internal links* is enabled. The plugin's rename handler is a safety net for vaults that keep Obsidian's built-in feature disabled, and runs only while **Automatically update all links in vault (when a file or folder is renamed)** is switched on — see [Plugin Settings](#plugin-settings).
+> **Note:** this is **off by default** — Obsidian performs these link updates natively when *Automatically update internal links* is enabled. The plugin's rename handler is a safety net for vaults that keep Obsidian's built-in feature disabled, and runs only while **Update links across vault on rename** is switched on — see [Plugin Settings](#plugin-settings).
 
 ---
 
@@ -215,8 +215,8 @@ When any file or folder is renamed, every note in the vault is scanned and links
 
 | Setting | Default | Effect |
 |---------|---------|--------|
-| **Automatically update all links in vault (when header numbering changes)** | On | **On** — links pointing at a renumbered heading are rewritten across the whole vault.<br>**Off** — only the note being renumbered is updated: its own links to its own headings are fixed, since nothing else would fix them. Links in other notes keep pointing at the previous heading text. |
-| **Automatically update all links in vault (when a file or folder is renamed)** | **Off** | **On** — after any rename the whole vault is scanned and links to the old name or path are rewritten.<br>**Off** — renames are left entirely to Obsidian's built-in *Automatically update internal links*. |
+| **Update links across vault on renumber** | On | **On** — links pointing at a renumbered heading are rewritten across the whole vault.<br>**Off** — only the note being renumbered is updated: its own links to its own headings are fixed, since nothing else would fix them. Links in other notes keep pointing at the previous heading text. |
+| **Update links across vault on rename** | **Off** | **On** — after any rename the whole vault is scanned and links to the old name or path are rewritten.<br>**Off** — renames are left entirely to Obsidian's built-in *Automatically update internal links*. |
 
 The two are independent.
 

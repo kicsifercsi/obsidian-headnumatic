@@ -482,7 +482,7 @@ class HeadnumaticSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("Automatically update all links in vault (when header numbering changes)")
+      .setName("Update links across vault on renumber")
       .setDesc(
         "On: links pointing to a renumbered heading are rewritten across the " +
           "whole vault. Off: only the note being renumbered is updated — its " +
@@ -499,7 +499,7 @@ class HeadnumaticSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Automatically update all links in vault (when a file or folder is renamed)")
+      .setName("Update links across vault on rename")
       .setDesc(
         "Off by default, because Obsidian already does this through its own " +
           '"Automatically update internal links" setting. Turn it on only if ' +
