@@ -96,8 +96,7 @@ function buildNumberString(
 export function processHeadings(
   content: string,
   config: HeadnumaticConfig,
-  filePath: string,
-  skipLine?: number
+  filePath: string
 ): NumberingResult {
   const lines = content.split("\n");
   const folderPrefix = config.usesFolderPrefix ? getFolderPrefix(filePath) : "";
@@ -141,10 +140,6 @@ export function processHeadings(
     for (let j = pos + 1; j < numLevels; j++) {
       counters[j] = (config.startNums[j] ?? 1) - 1;
     }
-
-    // Option 1: reserve the counter slot but leave the line untouched while the
-    // cursor is on it — the user may still be typing the heading title.
-    if (lineIdx === skipLine) continue;
 
     const numberStr = buildNumberString(counters.slice(0, pos + 1), config, folderPrefix);
     // Canonical output: "<hashes> <number> - <title>"

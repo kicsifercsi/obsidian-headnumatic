@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { ChangeSet, Text } from "@codemirror/state";
-import { computeLineEdits } from "../src/line-diff";
+import { computeLineEdits, insertionAtCursor } from "../src/line-diff";
 import { parseHeadnumaticConfig } from "../src/numbering-parser";
 import { processHeadings } from "../src/heading-engine";
 
@@ -174,4 +174,44 @@ describe("tests/line-diff.test.ts", () => {
     assert.equal(edits[0].from, 3);
     assert.equal(edits[0].text, "001.002.1 - ");
   });
+  test("TEST 8 – the cursor at the start of a title is found as an insert point", () => {
+    // Numbering "## Alpha" inserts at ch 3, right where the title begins. A
+    // cursor parked there must be reported so the caller can move it past the
+    // number — otherwise the next keystroke lands in front of it.
+    const edits = computeLineEdits("## Alpha", "## 001.002.1 - Alpha");
+
+    const hit = insertionAtCursor(edits, 0, 3);
+    assert.ok(hit, "cursor at the title start sits on the insertion");
+    assert.equal(hit!.text, "001.002.1 - ");
+
+    // The nudged position is where the title now starts.
+    assert.equal(3 + hit!.text.length, "## 001.002.1 - ".length);
+  });
+
+  test("TEST 9 – no other cursor position needs nudging", () => {
+    const edits = computeLineEdits("## Alpha", "## 001.002.1 - Alpha");
+
+    // Before the insertion, and anywhere inside or after the title.
+    for (const ch of [0, 1, 2, 4, 5, 8]) {
+      assert.equal(
+        insertionAtCursor(edits, 0, ch),
+        undefined,
+        `ch ${ch} must be left to CodeMirror`
+      );
+    }
+
+    // A different line never matches either.
+    assert.equal(insertionAtCursor(edits, 1, 3), undefined);
+  });
+
+  test("TEST 10 – a replacement is never treated as an insert point", () => {
+    // "001.002.9" -> "001.002.1" removes a character, so CodeMirror maps the
+    // cursor correctly on its own and nudging would double-count.
+    const edits = computeLineEdits("## 001.002.9 - Alpha", "## 001.002.1 - Alpha");
+
+    assert.equal(edits[0].from, 11);
+    assert.notEqual(edits[0].from, edits[0].to, "this edit deletes a character");
+    assert.equal(insertionAtCursor(edits, 0, 11), undefined);
+  });
+
 });

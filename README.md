@@ -191,10 +191,9 @@ A start value that does not match its level's format type (e.g. `c` where a numb
 
 ## Auto-Refresh
 
-With `auto-refresh` in the property, editing the note schedules a renumber 600 ms after you stop typing. Two details make this unobtrusive:
+With `auto-refresh` in the property, editing the note schedules a renumber 600 ms after you stop typing. Every heading is numbered on that pass, including the one you are currently typing in — a new heading gets its number as soon as you pause, without having to move the cursor or edit elsewhere first.
 
-- **The line the cursor is on is left alone.** Its number is still reserved, so the headings below stay correct, and the line is numbered as soon as the cursor moves away. This means a heading you are in the middle of typing is not rewritten under you.
-- **The cursor keeps its place.** Renumbering patches only the characters that actually change — for a renumbering, just the number itself — rather than rewriting the whole document or even the whole heading line. The cursor therefore sits outside the edited range and CodeMirror carries it along, so it stays where you left it in the title instead of being dropped at the start of the line.
+That is unobtrusive because **the cursor keeps its place**. Renumbering patches only the characters that actually change — for a renumbering, just the number itself — rather than rewriting the whole document or even the whole heading line. The cursor therefore sits outside the edited range and CodeMirror carries it along, so it stays where you left it in the title instead of being dropped at the start of the line. The one position CodeMirror cannot resolve on its own is a cursor sitting exactly where the number is inserted (the very start of the title); there the plugin moves it past the number, so typing continues at the front of the title as expected.
 
 Programmatic edits made by the plugin do not re-trigger auto-refresh.
 

@@ -58,3 +58,25 @@ export function computeLineEdits(oldContent: string, newContent: string): LineEd
 
   return edits;
 }
+
+/**
+ * Find an edit that inserts text at exactly `line`/`ch` without removing
+ * anything.
+ *
+ * CodeMirror maps a collapsed selection sitting on such a point to the *start*
+ * of the insertion, which leaves the cursor in front of the text just added.
+ * For a heading numbered while the cursor sat at the start of its title, that
+ * would put the next keystroke before the number ("## abc001.002.1 - Title").
+ * Callers use this to detect the case and move the cursor past the insertion,
+ * which is where the title — and so the cursor — still belongs.
+ *
+ * Every other cursor position is mapped correctly by CodeMirror on its own:
+ * before the edit it does not move, after it, it shifts by the length delta.
+ */
+export function insertionAtCursor(
+  edits: LineEdit[],
+  line: number,
+  ch: number
+): LineEdit | undefined {
+  return edits.find((e) => e.line === line && e.from === e.to && e.from === ch);
+}

@@ -18,7 +18,7 @@ import {
   updateLinksAfterRename,
   rewriteHeadingLinksInContent,
 } from "./link-updater";
-import { computeLineEdits } from "./line-diff";
+import { computeLineEdits, insertionAtCursor } from "./line-diff";
 import type { HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
@@ -217,9 +217,7 @@ export default class HeadnumaticPlugin extends Plugin {
         const config = parseHeadnumaticConfig(rawProp);
         if (!config?.autoRefresh) return;
 
-        // Option 1: pass the cursor line so processHeadings skips it while typing.
-        const cursorLine = editor.getCursor().line;
-        await this.applyToEditor(editor, file, content, config, cursorLine);
+        await this.applyToEditor(editor, file, content, config);
       } catch (e) {
         console.error("[HeadNumatic] auto-refresh error:", e);
       }
@@ -279,10 +277,9 @@ export default class HeadnumaticPlugin extends Plugin {
     editor: Editor,
     file: TFile,
     content: string,
-    config: HeadnumaticConfig,
-    skipLine?: number
+    config: HeadnumaticConfig
   ): Promise<void> {
-    const result = processHeadings(content, config, file.path, skipLine);
+    const result = processHeadings(content, config, file.path);
 
     // Diff the heading snapshot (what links currently point to) against the
     // freshly numbered headings to get reliable old→new text mappings. This
@@ -349,14 +346,31 @@ export default class HeadnumaticPlugin extends Plugin {
    * the very end of the line.
    */
   private applyLineDiff(editor: Editor, oldContent: string, newContent: string): void {
+    const edits = computeLineEdits(oldContent, newContent);
+
+    // Numbering an unnumbered heading inserts at the start of its title. If the
+    // cursor happens to sit exactly there, CodeMirror leaves it in front of the
+    // number, so the next keystroke would land before it; the cursor is moved
+    // past the insertion below. Edits never add or remove lines, so the cursor's
+    // line index stays valid and only its own line's edit can shift its column.
+    const cursor = editor.getCursor();
+    const insertedAtCursor = insertionAtCursor(edits, cursor.line, cursor.ch);
+
     // computeLineEdits returns the edits bottom-to-top, so each line index is
     // still valid by the time its edit is applied.
-    for (const edit of computeLineEdits(oldContent, newContent)) {
+    for (const edit of edits) {
       editor.replaceRange(
         edit.text,
         { line: edit.line, ch: edit.from },
         { line: edit.line, ch: edit.to }
       );
+    }
+
+    if (insertedAtCursor) {
+      editor.setCursor({
+        line: cursor.line,
+        ch: cursor.ch + insertedAtCursor.text.length,
+      });
     }
   }
 
