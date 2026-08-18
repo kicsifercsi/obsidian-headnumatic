@@ -18,6 +18,7 @@ import {
   updateLinksAfterRename,
   rewriteHeadingLinksInContent,
 } from "./link-updater";
+import { computeLineEdits } from "./line-diff";
 import type { HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
@@ -338,21 +339,23 @@ export default class HeadnumaticPlugin extends Plugin {
 
   /**
    * Apply the line-level differences between `oldContent` and `newContent` to
-   * the editor using replaceRange per changed line. Link/heading rewrites never
-   * add or remove lines, so a positional line comparison is sufficient and keeps
-   * the cursor mapping stable.
+   * the editor. Link/heading rewrites never add or remove lines, so a positional
+   * line comparison is sufficient.
+   *
+   * Each changed line is patched with the smallest replaceRange that covers the
+   * part which actually differs (see computeLineEdits): replacing the line as a
+   * whole put the cursor inside the replaced range, and CodeMirror maps such a
+   * position to the range's start — column 0 — for every cursor position except
+   * the very end of the line.
    */
   private applyLineDiff(editor: Editor, oldContent: string, newContent: string): void {
-    const oldLines = oldContent.split("\n");
-    const newLines = newContent.split("\n");
-    // Apply bottom-to-top as a cheap safety net for line-index validity.
-    for (let i = newLines.length - 1; i >= 0; i--) {
-      const oldLine = oldLines[i] ?? "";
-      if (oldLine === newLines[i]) continue;
+    // computeLineEdits returns the edits bottom-to-top, so each line index is
+    // still valid by the time its edit is applied.
+    for (const edit of computeLineEdits(oldContent, newContent)) {
       editor.replaceRange(
-        newLines[i],
-        { line: i, ch: 0 },
-        { line: i, ch: oldLine.length }
+        edit.text,
+        { line: edit.line, ch: edit.from },
+        { line: edit.line, ch: edit.to }
       );
     }
   }

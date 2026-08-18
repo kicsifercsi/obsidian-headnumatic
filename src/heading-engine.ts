@@ -20,8 +20,16 @@ function findBodyStart(lines: string[]): number {
  * A generated number consists of one or more segments (each either all-digits
  * or a single letter) joined by dots:  001  |  001.a  |  1.a.B.3  etc.
  * No minimum dot count — single-level numbers ("001", "a") are valid too.
+ *
+ * A trailing run of symbols is allowed so that a format suffix ("?.1.1.1:" →
+ * "1.1.1:") is stripped again on the next pass instead of being mistaken for
+ * part of the title, which would make the number accumulate on every refresh.
+ * The run deliberately excludes letters, digits and "_": without that, "v1.2.3"
+ * in "v1.2.3 - Release notes" would parse as the single letter "v" plus a
+ * suffix and the version would be eaten off the title.
  */
-const NUMBER_SEGMENT_RE = /^(?:\d+|[a-z]|[A-Z])(?:\.(?:\d+|[a-z]|[A-Z]))*$/;
+const NUMBER_SEGMENT_RE =
+  /^(?:\d+|[a-z]|[A-Z])(?:\.(?:\d+|[a-z]|[A-Z]))*[^\s\w]*$/;
 
 /**
  * Strip a previously inserted numbering prefix from heading text.
@@ -54,7 +62,9 @@ function stripNumberPrefix(text: string): string {
  * Build the full number string for a given set of counters.
  *
  * Each counter value is formatted according to its FormatPart descriptor and
- * all parts (including the optional folder prefix) are joined with ".".
+ * all parts (including the optional folder prefix) are joined with ".".  Any
+ * literal suffix from the format value is appended to the result, so a format
+ * of "?.1.1.1:" numbers the third level as "02.01.1.1.1:".
  */
 function buildNumberString(
   counters: number[],
@@ -72,7 +82,7 @@ function buildNumberString(
     parts.push(fp ? formatValue(counters[i], fp) : counters[i].toString());
   }
 
-  return parts.join(".");
+  return parts.join(".") + config.formatSuffix;
 }
 
 /**

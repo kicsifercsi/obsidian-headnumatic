@@ -70,8 +70,8 @@ headnumatic-numbering: auto-refresh, first-level 2, max-level 4, format ?.001.a.
 | `auto-refresh` | When present, heading numbers are updated automatically whenever the note is edited (debounced 600 ms). Vault links pointing to changed headings are updated too. Without it, only the manual commands renumber the note. |
 | `first-level <n>` | First heading level (`##` = 2, `###` = 3 …) that receives a number. Accepted range 1–6; a value outside that range is ignored and the default is kept. Default: `1`. |
 | `max-level <n>` | Last heading level that receives a number (inclusive). Must be ≥ 1; values above 6 have no additional effect since Markdown stops at `######`. Default: `6`. |
-| `format <value>` | **Required.** Defines the numbering format for each level (see below). |
-| `start-values <value>` | Optional starting value for each level's counter (same structure as `format`). |
+| `format <value>` | **Required.** Defines the numbering format for each level, plus an optional literal suffix appended to every number (see below). |
+| `start-values <value>` | Optional starting value for each level's counter (same structure as `format`, and it may carry the same suffix). |
 
 Directives may appear in any order, and all except `format` may be omitted.
 
@@ -104,6 +104,24 @@ The format string uses `.` as a separator. Each segment describes how one level 
 | `A` | Uppercase letter (`A`…`Z`, wrapping back to `A` after 26). | `A`, `Z` |
 
 The segment positions (after the optional `?`) map 1:1 to heading levels starting at `first-level`. If `max-level` implies more levels than the format lists, the surplus levels fall back to plain integers.
+
+### Trailing Suffix
+
+Anything after the last level format is treated as a literal **suffix** and appended to every generated number. `format ?.1.1.1:` numbers the third level as `02.01.1.1.1:` — the trailing `:` is not a level format, so it is carried through to the heading as-is:
+
+| Format | Level | Rendered as |
+|--------|-------|-------------|
+| `?.1.1.1:` | `#` | `# 02.01.1: - Introduction` |
+| `?.1.1.1:` | `##` | `## 02.01.1.1: - Overview` |
+| `?.1.1.1:` | `###` | `### 02.01.1.1.1: - Details` |
+| `?.001.a)` | `#` | `# 7.001) - Introduction` |
+| `1.1=>` | `#` | `# 1=> - Introduction` |
+
+The suffix is everything the parser cannot read as a level format, so it may be more than one character (`=>`) and may include a dot: `?.001.a.)` yields `7.001.)`, because the `.` before `)` is part of the suffix rather than a separator. The suffix sits inside the number, before the ` - ` separator, and it is stripped along with the number on the next refresh, so it does not accumulate.
+
+A suffix may contain **symbols only** — no letters, digits, `_` or spaces. A trailing run containing any of those is not treated as a suffix at all; it is ignored like any other unreadable segment, and the number is produced without it.
+
+That restriction is what keeps numbering reversible. The suffix has to be recognised again in order to be stripped on the next refresh, and the stripper can only safely skip a run of symbols: if it also skipped letters and digits, a heading like `# v1.2.3 - Release notes` would have its version read as a number and cut from the title. Were a suffix such as `:a` accepted, it could be written but never removed, and the number would nest on every refresh (`1:a - A` → `1:a - 1:a - A`).
 
 ### Example with folder prefix (`?`)
 
@@ -148,11 +166,13 @@ Sets the counter for each level to begin at the specified value. The `?` placeho
 
 A start value that does not match its level's format type (e.g. `c` where a number is expected) falls back to `1`. Levels not covered by the string also start at `1`.
 
+`start-values` may repeat the format's trailing suffix (`format ?.1.1:` pairs with `start-values ?.3.5:`); it is ignored when the starting values are read, so the two strings can be kept visually identical.
+
 ---
 
 ## How Numbering Is Applied
 
-- **Heading format.** The canonical output is `<hashes> <number> - <title>`. On every refresh an existing number is stripped and recomputed, so numbers never accumulate. The older `<number> <title>` form (without the ` - ` separator) is also recognised and converted on the next refresh.
+- **Heading format.** The canonical output is `<hashes> <number> - <title>`, where `<number>` includes any [trailing suffix](#trailing-suffix) — the ` - ` separator always follows it. On every refresh an existing number is stripped and recomputed, so numbers never accumulate. The older `<number> <title>` form (without the ` - ` separator) is also recognised and converted on the next refresh.
 - **What counts as a heading.** A line matching `#` to `######` followed by a single space and a non-empty title. Frontmatter and fenced code blocks (``` and ~~~) are skipped.
 - **Counters.** Each numbered heading increments its own level's counter and resets all deeper counters to their start values.
 - **Levels outside the range.** Headings shallower than `first-level` or deeper than `max-level` are left exactly as they are and do not affect any counter.
@@ -174,7 +194,7 @@ A start value that does not match its level's format type (e.g. `c` where a numb
 With `auto-refresh` in the property, editing the note schedules a renumber 600 ms after you stop typing. Two details make this unobtrusive:
 
 - **The line the cursor is on is left alone.** Its number is still reserved, so the headings below stay correct, and the line is numbered as soon as the cursor moves away. This means a heading you are in the middle of typing is not rewritten under you.
-- **The cursor keeps its place.** Changed lines are patched individually rather than by replacing the whole document, and the cursor position is restored afterwards, so renumbering never scrolls or jumps the editor.
+- **The cursor keeps its place.** Renumbering patches only the characters that actually change — for a renumbering, just the number itself — rather than rewriting the whole document or even the whole heading line. The cursor therefore sits outside the edited range and CodeMirror carries it along, so it stays where you left it in the title instead of being dropped at the start of the line.
 
 Programmatic edits made by the plugin do not re-trigger auto-refresh.
 
@@ -276,7 +296,7 @@ Pushing a tag triggers the GitHub Actions workflow, which builds and creates a r
 npm test     # or: ./runtest
 ```
 
-The suite covers the numbering engine (folder prefixes, letter formats, start values, level cut-offs, malformed-config detection), the heading-diff logic used for link updates, and the link rewriters themselves (path and extension handling on rename, and which notes get written).
+The suite covers the numbering engine (folder prefixes, letter formats, start values, level cut-offs, malformed-config detection), the heading-diff logic used for link updates, the link rewriters themselves (path and extension handling on rename, and which notes get written), and cursor preservation when edits are applied to the editor — the last of these runs against the real CodeMirror `state` package, so it reflects how Obsidian actually maps the cursor rather than an approximation of it.
 
 ---
 

@@ -14,6 +14,12 @@ export interface HeadnumaticConfig {
   maxLevel: number;
   /** Raw format string from the property (e.g. "?.001.a.A.1"). */
   format: string;
+  /**
+   * Literal text following the last level format in `format`, appended to every
+   * generated number (e.g. ":" in "?.1.1.1:" yields "02.01.1.1.1:").
+   * Empty when the format ends on a level format.
+   */
+  formatSuffix: string;
   /** Raw start-values string, or null. */
   startValues: string | null;
   /** Whether the format string begins with "?". */

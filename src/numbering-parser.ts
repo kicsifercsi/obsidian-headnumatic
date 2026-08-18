@@ -47,6 +47,7 @@ export function parseHeadnumaticConfig(rawValue: unknown): HeadnumaticConfig | n
     firstLevel: 1,
     maxLevel: 6,
     format: "",
+    formatSuffix: "",
     startValues: null,
     usesFolderPrefix: false,
     formatParts: [],
@@ -74,9 +75,10 @@ export function parseHeadnumaticConfig(rawValue: unknown): HeadnumaticConfig | n
   if (!config.format) return null;
   if (config.firstLevel > config.maxLevel) return null;
 
-  const { parts, usesFolderPrefix } = parseFormatString(config.format);
+  const { parts, usesFolderPrefix, suffix } = parseFormatString(config.format);
   config.formatParts = parts;
   config.usesFolderPrefix = usesFolderPrefix;
+  config.formatSuffix = suffix;
   config.startNums = parseStartNums(config.startValues, parts);
 
   // Pad formatParts and startNums to cover every level implied by max-level.
@@ -91,10 +93,50 @@ export function parseHeadnumaticConfig(rawValue: unknown): HeadnumaticConfig | n
   return config;
 }
 
+/** One level format: the folder-prefix marker, a run of digits, or a run of letters. */
+const FORMAT_SEGMENT = "(?:\\?|\\d+|[a-z]+|[A-Z]+)";
+
+/**
+ * A format value is dot-joined level formats followed by an optional literal
+ * suffix. The segment group is greedy, so the suffix is exactly the text after
+ * the last level format: "?.1.1.1:" splits into "?.1.1.1" and ":".
+ */
+const FORMAT_RE = new RegExp(
+  `^(${FORMAT_SEGMENT}(?:\\.${FORMAT_SEGMENT})*)(.*)$`
+);
+
+/**
+ * A usable suffix is built only from symbols — no letters, digits, "_" or
+ * whitespace.
+ *
+ * This is not cosmetic: heading-engine's NUMBER_SEGMENT_RE has to recognise the
+ * suffix again to strip it, and it can only tolerate a symbol run there without
+ * swallowing version-like titles ("v1.2.3 - Release notes"). Accepting a suffix
+ * the stripper cannot remove would make the number accumulate on every refresh
+ * ("1:a - A" → "1:a - 1:a - A"), so the two rules are kept in step.
+ */
+const SUFFIX_RE = /^[^\s\w]*$/;
+
+/** Split a format value into its level-format part and its literal suffix. */
+function splitFormatSuffix(format: string): { segments: string; suffix: string } {
+  const m = format.match(FORMAT_RE);
+
+  // No suffix to take when the value does not start with a level format, or when
+  // the remainder is not a symbol run — a whitespace remainder in particular
+  // means a directive was swallowed by a missing comma, which
+  // validateHeadnumaticRaw rejects outright. Both fall through to the segment
+  // loop, which ignores what it cannot read rather than pasting the debris onto
+  // every number.
+  if (!m || !SUFFIX_RE.test(m[2])) return { segments: format, suffix: "" };
+
+  return { segments: m[1], suffix: m[2] };
+}
+
 function parseFormatString(
   format: string
-): { parts: FormatPart[]; usesFolderPrefix: boolean } {
-  const segments = format.split(".");
+): { parts: FormatPart[]; usesFolderPrefix: boolean; suffix: string } {
+  const { segments: segmentPart, suffix } = splitFormatSuffix(format);
+  const segments = segmentPart.split(".");
   const parts: FormatPart[] = [];
   let usesFolderPrefix = false;
 
@@ -115,7 +157,7 @@ function parseFormatString(
     // Unknown segments are silently ignored.
   }
 
-  return { parts, usesFolderPrefix };
+  return { parts, usesFolderPrefix, suffix };
 }
 
 function parseStartNums(
@@ -124,7 +166,11 @@ function parseStartNums(
 ): (number | null)[] {
   if (!startValues) return formatParts.map(() => null);
 
-  const segments = startValues.split(".").filter((s) => s !== "?");
+  // start-values mirrors the format's shape, so it may carry the same trailing
+  // suffix ("?.1.1.1:"); drop it before reading the per-level values.
+  const segments = splitFormatSuffix(startValues)
+    .segments.split(".")
+    .filter((s) => s !== "?");
 
   return formatParts.map((part, i) => {
     if (i >= segments.length) return null;
