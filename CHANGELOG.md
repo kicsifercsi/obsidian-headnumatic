@@ -12,6 +12,8 @@ Releases before 0.4.22 predate this file; see the commit history for those.
 
 ## [Unreleased]
 
+## [0.4.23] - 2026-08-19
+
 ### Changed
 
 - **Refresh heading numbers in all notes** now uses Obsidian's metadata cache to
