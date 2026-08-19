@@ -3,7 +3,9 @@ on:
   push:
     tags: ["*"]
 permissions:
-  contents: write
+  contents: write # create the release and upload assets
+  id-token: write # request the Sigstore OIDC token used to sign
+  attestations: write # record the attestation against the repository
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,12 +15,33 @@ jobs:
         with:
           node-version: "24"
       - run: npm ci && npm run build
-      - name: Create release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Collected once so the attested files and the uploaded files can never
+      # drift apart.  `list` is space-separated for gh, `paths` is
+      # newline-separated for actions/attest-build-provenance.
+      - name: Collect release assets
+        id: assets
         run: |
           files="main.js manifest.json"
           if [ -f styles.css ]; then files="$files styles.css"; fi
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            $files          
+          echo "list=$files" >> "$GITHUB_OUTPUT"
+          {
+            echo "paths<<EOF"
+            printf '%s\n' $files
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Runs before the release is published so a failure here never leaves an
+      # unattested release behind.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ steps.assets.outputs.paths }}
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          FILES: ${{ steps.assets.outputs.list }}
+        run: |
+          gh release create "$TAG" --title "$TAG" $FILES
