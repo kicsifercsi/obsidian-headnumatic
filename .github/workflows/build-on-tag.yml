@@ -38,10 +38,48 @@ jobs:
         with:
           subject-path: ${{ steps.assets.outputs.paths }}
 
+      # Pull the CHANGELOG section matching this tag out into a notes file.
+      # When there is no matching section the release falls back to GitHub's
+      # generated notes, so a release is never published with an empty body.
+      - name: Build release notes
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          : > release-notes.md
+          if [ -f CHANGELOG.md ]; then
+            # Everything between this version's heading and the next one.
+            # `index(...) == 1` anchors the match to the start of the line and
+            # requires the closing bracket, so 0.4.2 never matches 0.4.22.
+            awk -v header="## [$version]" '
+              index($0, header) == 1 { inside = 1; next }
+              inside && index($0, "## [") == 1 { exit }
+              inside { print }
+            ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          fi
+          # Test for real content, not file size: a section that exists but is
+          # empty must still fall through to the generated notes.
+          if grep -q '[^[:space:]]' release-notes.md; then
+            # Drop the trailing blank lines left by the section split.
+            printf '%s\n' "$(cat release-notes.md)" > release-notes.md
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Release notes for $version:"
+            cat release-notes.md
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No CHANGELOG entry for $version; falling back to generated notes."
+          fi
+
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           FILES: ${{ steps.assets.outputs.list }}
         run: |
-          gh release create "$TAG" --title "$TAG" $FILES
+          if [ "${{ steps.notes.outputs.found }}" = "true" ]; then
+            notes_args="--notes-file release-notes.md"
+          else
+            notes_args="--generate-notes"
+          fi
+          gh release create "$TAG" --title "$TAG" $notes_args $FILES

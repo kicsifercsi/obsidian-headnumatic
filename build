@@ -11,6 +11,7 @@ set -euo pipefail
 #   2. Increment the patch version component
 #   3. Write the new version back to manifest.json and package.json
 #   4. Record the new version in versions.json (only when the argument is Y)
+#   4b. Promote CHANGELOG.md's [Unreleased] section to the new version
 #   5. Type-check TypeScript (no emit)
 #   6. Bundle with esbuild (production)
 #   7. Copy distributable files to ./build-output/
@@ -95,6 +96,38 @@ fs.writeFileSync('versions.json', JSON.stringify(versions, null, 2) + '\n');
   echo "versions.json: added ${NEW_VERSION}"
 else
   echo "versions.json: left unchanged"
+fi
+
+# ── 4b. CHANGELOG.md ────────────────────────────────────────────────────────
+# Promote whatever sits under "## [Unreleased]" to the new version number and
+# leave a fresh empty [Unreleased] heading above it.  The release workflow
+# publishes that section as the GitHub release description.
+#
+# The headings are matched anchored to the start of a line, so prose that
+# merely mentions "## [Unreleased]" is not mistaken for the heading itself.
+if [[ -f CHANGELOG.md ]]; then
+  NEW_VERSION="$NEW_VERSION" node <<'NODE'
+const fs = require('fs');
+
+const version = process.env.NEW_VERSION;
+const unreleasedRe = /^## \[Unreleased\][ \t]*$/m;
+const versionRe = new RegExp('^## \\[' + version.replace(/\./g, '\\.') + '\\]', 'm');
+
+let text = fs.readFileSync('CHANGELOG.md', 'utf8');
+
+if (versionRe.test(text)) {
+  console.log('CHANGELOG.md: section for ' + version + ' already present, left unchanged');
+} else if (!unreleasedRe.test(text)) {
+  console.log('CHANGELOG.md: no [Unreleased] heading found, left unchanged');
+} else {
+  const today = new Date().toISOString().slice(0, 10);
+  text = text.replace(unreleasedRe, '## [Unreleased]\n\n## [' + version + '] - ' + today);
+  fs.writeFileSync('CHANGELOG.md', text);
+  console.log('CHANGELOG.md: [Unreleased] promoted to ' + version);
+}
+NODE
+else
+  echo "CHANGELOG.md: not found, skipped"
 fi
 
 # ── 5. TypeScript type-check ─────────────────────────────────────────────────
