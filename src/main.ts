@@ -10,6 +10,7 @@ import {
   Editor,
   MarkdownView,
 } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 
 import { parseHeadnumaticConfig, validateHeadnumaticRaw, HeadnumaticConfig } from "./numbering-parser";
 import { processHeadings, readHeadnumaticProperty, parseHeadings, diffHeadings } from "./heading-engine";
@@ -53,7 +54,7 @@ export default class HeadnumaticPlugin extends Plugin {
   settings: HeadnumaticSettings = { ...DEFAULT_SETTINGS };
 
   /** Debounce timers keyed by file path. */
-  private refreshTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private refreshTimers: Map<string, number> = new Map();
 
   /** Last known cursor line per file, used to detect when the cursor leaves the settings line. */
   private prevCursorLines: Map<string, number> = new Map();
@@ -140,14 +141,15 @@ export default class HeadnumaticPlugin extends Plugin {
   }
 
   onunload() {
-    for (const timer of this.refreshTimers.values()) clearTimeout(timer);
+    for (const timer of this.refreshTimers.values()) window.clearTimeout(timer);
     this.refreshTimers.clear();
     this.prevCursorLines.clear();
     this.headingSnapshots.clear();
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = (await this.loadData()) as Partial<HeadnumaticSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
 
   async saveSettings(): Promise<void> {
@@ -200,9 +202,9 @@ export default class HeadnumaticPlugin extends Plugin {
 
   private scheduleAutoRefresh(editor: Editor, file: TFile) {
     const existing = this.refreshTimers.get(file.path);
-    if (existing) clearTimeout(existing);
+    if (existing) window.clearTimeout(existing);
 
-    const timer = setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       this.refreshTimers.delete(file.path);
       try {
         // Always read from the editor — it holds the latest unsaved content.
@@ -478,6 +480,20 @@ export default class HeadnumaticPlugin extends Plugin {
   }
 }
 
+const RENUMBER_SETTING_NAME = "Update links across vault on renumber";
+const RENUMBER_SETTING_DESC =
+  "On: links pointing to a renumbered heading are rewritten across the " +
+  "whole vault. Off: only the note being renumbered is updated — its " +
+  "own links to its own headings — and links elsewhere keep pointing " +
+  "at the previous heading text.";
+
+const RENAME_SETTING_NAME = "Update links across vault on rename";
+const RENAME_SETTING_DESC =
+  "Off by default, because Obsidian already does this through its own " +
+  '"Automatically update internal links" setting. Turn it on only if ' +
+  "you keep that disabled: it makes the plugin read every note in the " +
+  "vault on every rename.";
+
 class HeadnumaticSettingTab extends PluginSettingTab {
   plugin: HeadnumaticPlugin;
 
@@ -486,18 +502,48 @@ class HeadnumaticSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /**
+   * Declarative settings (Obsidian 1.13.0+). Returning definitions here makes
+   * the settings discoverable through Obsidian's settings search; the tab is
+   * rendered from them and `display()` is no longer called.
+   *
+   * Values are read from and written to `this.plugin.settings` by
+   * PluginSettingTab's default `getControlValue`/`setControlValue`.
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        name: RENUMBER_SETTING_NAME,
+        desc: RENUMBER_SETTING_DESC,
+        control: {
+          type: "toggle",
+          key: "updateAllLinksOnRenumber",
+          defaultValue: DEFAULT_SETTINGS.updateAllLinksOnRenumber,
+        },
+      },
+      {
+        name: RENAME_SETTING_NAME,
+        desc: RENAME_SETTING_DESC,
+        control: {
+          type: "toggle",
+          key: "updateAllLinksOnRename",
+          defaultValue: DEFAULT_SETTINGS.updateAllLinksOnRename,
+        },
+      },
+    ];
+  }
+
+  /**
+   * Imperative fallback for Obsidian versions older than 1.13.0, which do not
+   * know about `getSettingDefinitions()`. Keep in sync with it.
+   */
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("Update links across vault on renumber")
-      .setDesc(
-        "On: links pointing to a renumbered heading are rewritten across the " +
-          "whole vault. Off: only the note being renumbered is updated — its " +
-          "own links to its own headings — and links elsewhere keep pointing " +
-          "at the previous heading text."
-      )
+      .setName(RENUMBER_SETTING_NAME)
+      .setDesc(RENUMBER_SETTING_DESC)
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.updateAllLinksOnRenumber)
@@ -508,13 +554,8 @@ class HeadnumaticSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Update links across vault on rename")
-      .setDesc(
-        "Off by default, because Obsidian already does this through its own " +
-          '"Automatically update internal links" setting. Turn it on only if ' +
-          "you keep that disabled: it makes the plugin read every note in the " +
-          "vault on every rename."
-      )
+      .setName(RENAME_SETTING_NAME)
+      .setDesc(RENAME_SETTING_DESC)
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.updateAllLinksOnRename)

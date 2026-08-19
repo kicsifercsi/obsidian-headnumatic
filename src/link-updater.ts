@@ -96,7 +96,13 @@ function replaceHeadingInLinks(
 
   content = content.replace(
     wikiRe,
-    (match, open, notePart, _heading, alias) => {
+    (
+      match: string,
+      open: string,
+      notePart: string,
+      _heading: string,
+      alias: string | undefined
+    ) => {
       if (!refersToFile(notePart.trim(), targetFile, app)) return match;
       return `${open}${notePart}#${newHeadingEsc}${alias ?? ""}]]`;
     }
@@ -112,7 +118,13 @@ function replaceHeadingInLinks(
 
   content = content.replace(
     mdRe,
-    (match, linkOpen, notePart, _heading, close) => {
+    (
+      match: string,
+      linkOpen: string,
+      notePart: string,
+      _heading: string,
+      close: string
+    ) => {
       if (!refersToFile(safeDecodeURIComponent(notePart).trim(), targetFile, app))
         return match;
       return `${linkOpen}${notePart}#${encodeURIComponent(newHeadingEsc)}${close}`;
@@ -202,7 +214,14 @@ function rewriteLinksForFileRename(
   // literal text, so nothing is percent-encoded here.
   content = content.replace(
     /(\[\[)([^[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
-    (match, open, ref, anchor, alias, close) => {
+    (
+      match: string,
+      open: string,
+      ref: string,
+      anchor: string,
+      alias: string | undefined,
+      close: string
+    ) => {
       const trimRef = ref.trim();
 
       let replacement: string | null = null;
@@ -224,7 +243,7 @@ function rewriteLinksForFileRename(
   // most specific form is tested first.
   content = content.replace(
     /(\[[^\]]*\]\()([^)#]+)((?:#[^)]*)?)\)/g,
-    (match, linkOpen, ref, anchor) => {
+    (match: string, linkOpen: string, ref: string, anchor: string) => {
       const decoded = safeDecodeURIComponent(ref).trim();
 
       let replacement: string | null = null;
@@ -257,7 +276,14 @@ function rewriteLinksForFolderRename(
   // Wikilinks that embed the full path.
   content = content.replace(
     /(\[\[)([^[\]#|]+)((?:#[^\]|]*)?)(\|[^\]]*)?(\]\])/g,
-    (match, open, ref, anchor, alias, close) => {
+    (
+      match: string,
+      open: string,
+      ref: string,
+      anchor: string,
+      alias: string | undefined,
+      close: string
+    ) => {
       if (ref.startsWith(oldPrefix)) {
         return `${open}${newPrefix}${ref.slice(oldPrefix.length)}${anchor}${alias ?? ""}${close}`;
       }
@@ -268,7 +294,7 @@ function rewriteLinksForFolderRename(
   // Markdown links.
   content = content.replace(
     /(\[[^\]]*\]\()([^)#]+)((?:#[^)]*)?)\)/g,
-    (match, linkOpen, ref, anchor) => {
+    (match: string, linkOpen: string, ref: string, anchor: string) => {
       const decoded = safeDecodeURIComponent(ref);
       if (decoded.startsWith(oldPrefix)) {
         const newRef = newPrefix + decoded.slice(oldPrefix.length);
