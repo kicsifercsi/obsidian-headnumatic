@@ -12,6 +12,21 @@ Releases before 0.4.22 predate this file; see the commit history for those.
 
 ## [Unreleased]
 
+### Changed
+
+- **Refresh heading numbers in all notes** now uses Obsidian's metadata cache to
+  skip notes without the `headnumatic-numbering` property instead of reading
+  every note in the vault to find out.
+- The notice that command shows now counts the notes actually renumbered rather
+  than every Markdown file scanned.
+
+### Added
+
+- README section explaining why the plugin can enumerate the vault, which
+  features need it, and how to switch them off.
+
+## [0.4.22] - 2026-08-19
+
 ### Added
 
 - Release assets now carry GitHub artifact attestations, so a download can be

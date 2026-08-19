@@ -252,7 +252,7 @@ The renumbering switch defaults to on and has no built-in equivalent to fall bac
 ## Known Limitations
 
 - With the vault-wide settings on, every link update scans and reads all Markdown files in the vault. On very large vaults with `auto-refresh` enabled this is noticeable — the two switches in [Plugin Settings](#plugin-settings) turn it off per trigger.
-- **Refresh heading numbers in all notes** reports the total number of Markdown files scanned, not the number of notes actually renumbered. If the active note has no `headnumatic-numbering` property, it also shows the "no property found" notice.
+- **Refresh heading numbers in all notes** shows the "no property found" notice when the active note has no `headnumatic-numbering` property, even though the rest of the vault is processed normally.
 - Fenced code blocks are tracked with a simple open/close toggle, so an unbalanced fence inside a note can cause headings after it to be skipped.
 - Headings are matched only in the `# Title` form; Setext-style headings (underlined with `===` or `---`) are not numbered.
 
@@ -330,6 +330,30 @@ This plugin operates entirely within your local vault. It does not:
 - Connect to any external service or API
 
 All processing happens locally on your device. The only files it reads and writes are the Markdown notes inside your vault.
+
+### Why the plugin can see every note
+
+Obsidian's plugin review flags HeadNumatic as enumerating the vault, because it
+calls `vault.getMarkdownFiles()`. That is inherent to what link updating does: a
+link pointing at a renumbered heading can live in *any* note, and there is no
+way to know which notes those are without looking.
+
+It happens in three places:
+
+- **After a note's headings are renumbered** — other notes may link to those
+  headings by their old text. Controlled by *Update links across vault on
+  renumber*.
+- **After a file or folder is renamed** — other notes may link to the old path.
+  Controlled by *Update links across vault on rename*, which is off by default.
+- **Refresh heading numbers in all notes** — a command you invoke explicitly,
+  where covering the whole vault is the entire point. Notes without the
+  `headnumatic-numbering` property are identified through Obsidian's metadata
+  cache and skipped without being read.
+
+Both vault-wide link passes can be turned off in
+[Plugin Settings](#plugin-settings). Either way nothing leaves your machine:
+the plugin makes no network requests of any kind, so file names and paths are
+never transmitted anywhere.
 
 ---
 

@@ -24,6 +24,9 @@ import type { HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
 
+/** Frontmatter property a note must carry to opt in to numbering. */
+const NUMBERING_PROPERTY = "headnumatic-numbering";
+
 interface HeadnumaticSettings {
   /**
    * Vault-wide link rewriting after headings are renumbered.
@@ -237,30 +240,33 @@ export default class HeadnumaticPlugin extends Plugin {
    * Reads content from the editor itself (latest unsaved state) and writes
    * back through the Editor API for an immediate visual update.
    */
-  private async refreshWithEditor(editor: Editor, file: TFile): Promise<void> {
+  /** Returns true when the note was actually renumbered. */
+  private async refreshWithEditor(editor: Editor, file: TFile): Promise<boolean> {
     try {
       const content = editor.getValue();
       const rawProp = readHeadnumaticProperty(content);
       if (!rawProp) {
         new Notice("No 'headnumatic-numbering' property found in this note.");
-        return;
+        return false;
       }
 
       if (!validateHeadnumaticRaw(rawProp)) {
         new Notice(MALFORMED_NOTICE);
-        return;
+        return false;
       }
 
       const config = parseHeadnumaticConfig(rawProp);
       if (!config) {
         new Notice(MALFORMED_NOTICE);
-        return;
+        return false;
       }
 
       await this.applyToEditor(editor, file, content, config);
+      return true;
     } catch (e) {
       console.error("[HeadNumatic] refreshWithEditor error:", e);
       new Notice("Error refreshing heading numbers. Check the console for details.");
+      return false;
     }
   }
 
@@ -380,13 +386,14 @@ export default class HeadnumaticPlugin extends Plugin {
    * Apply numbering to a file that is not currently open in an editor
    * (used by "refresh all").
    */
-  private async applyToFile(file: TFile): Promise<void> {
+  /** Returns true when the note was actually renumbered. */
+  private async applyToFile(file: TFile): Promise<boolean> {
     const content = await this.app.vault.cachedRead(file);
     const rawProp = readHeadnumaticProperty(content);
-    if (!rawProp) return;
+    if (!rawProp) return false;
 
     const config = parseHeadnumaticConfig(rawProp);
-    if (!config) return;
+    if (!config) return false;
 
     const result = processHeadings(content, config, file.path);
 
@@ -422,6 +429,23 @@ export default class HeadnumaticPlugin extends Plugin {
     }
 
     this.headingSnapshots.set(file.path, newHeadings);
+    return true;
+  }
+
+  /**
+   * True when the metadata cache says `file` carries the numbering property.
+   *
+   * Only used to skip notes before reading them, so the unknown case has to be
+   * conservative: a file with no cache entry yet is reported as opted in and
+   * gets read, rather than being silently skipped.
+   */
+  private looksNumbered(file: TFile): boolean {
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache) return true;
+    if (!cache.frontmatter) return false;
+    // Tests for the key rather than reading it: the value is typed `any`, and
+    // presence is all that matters — the value is parsed from the note itself.
+    return NUMBERING_PROPERTY in cache.frontmatter;
   }
 
   /** Refresh every note in the vault that carries the headnumatic-numbering property. */
@@ -434,13 +458,19 @@ export default class HeadnumaticPlugin extends Plugin {
     let count = 0;
 
     for (const file of files) {
+      const editor =
+        activeFile && file.path === activeFile.path ? activeView?.editor : undefined;
+
+      // Skip notes that never opted in without reading them. The active note is
+      // exempt: its buffer may hold a property that has not been saved yet, so
+      // the cache can legitimately disagree with what the user is looking at.
+      if (!editor && !this.looksNumbered(file)) continue;
+
       try {
-        if (activeFile && file.path === activeFile.path && activeView?.editor) {
-          await this.refreshWithEditor(activeView.editor, file);
-        } else {
-          await this.applyToFile(file);
-        }
-        count++;
+        const renumbered = editor
+          ? await this.refreshWithEditor(editor, file)
+          : await this.applyToFile(file);
+        if (renumbered) count++;
       } catch (e) {
         console.error(`[HeadNumatic] error processing ${file.path}:`, e);
       }
