@@ -6,6 +6,10 @@ An [Obsidian](https://obsidian.md/) plugin that automatically adds hierarchical 
 
 ---
 
+## Background information
+
+This plugin was written with the aid of AI, taking into account the Obsidian guidelines. The main motivation for this plugin was making my life easier when writing technical documentation, mainly because inserting new notes and modifying content was not updating all references. This solution is geared towards a specific way of organizing the information so at the end, its easy to create a printable document that has the correct references also findable in the physical document. 
+
 ## Folder & Note Structure
 
 The plugin is designed for a vault that follows this layout:
@@ -38,7 +42,7 @@ This layout only matters for the `?` folder-prefix format segment. Everything el
 
 ## Installation
 
-### Manual (recommended during development)
+### Manual (used only for development)
 
 1. Build the plugin (see [Building](#building)).
 2. Copy the contents of `build-output/` into your vault's plugin directory:  
@@ -299,12 +303,6 @@ The suite covers the numbering engine (folder prefixes, letter formats, start va
 
 ---
 
-## Migrating from `techdoc-numbering`
-
-The frontmatter key was previously `techdoc-numbering`. It is no longer recognised — rename it to `headnumatic-numbering` in each note. A note still using the old key is silently skipped, with no notice shown.
-
----
-
 ## Funding
 
 If you find this plugin useful, consider buying me a coffee - it helps me stay awake !
@@ -319,7 +317,7 @@ If you find this plugin useful, consider buying me a coffee - it helps me stay a
 |---|---|
 | Obsidian desktop | Yes |
 | Obsidian mobile | Yes |
-| Minimum Obsidian version | 1.1.1 |
+| Minimum Obsidian version | 1.2.8 |
 
 ---
 

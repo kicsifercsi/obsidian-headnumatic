@@ -1,8 +1,8 @@
 {
   "id": "headnumatic",
   "name": "HeadNumatic",
-  "version": "0.4.20",
-  "minAppVersion": "1.1.1",
+  "version": "0.4.21",
+  "minAppVersion": "1.2.8",
   "description": "Automatically number headings in your notes based on folder structure and a configurable format.",
   "author": "kicsifercsi",
   "authorUrl": "https://github.com/kicsifercsi",
