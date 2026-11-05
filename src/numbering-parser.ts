@@ -1,4 +1,4 @@
-import type { FormatPart, HeadnumaticConfig } from "./types";
+import type { FormatPart, HeaderPrefixing, HeadnumaticConfig } from "./types";
 
 export type { HeadnumaticConfig };
 
@@ -210,17 +210,31 @@ export function formatValue(value: number, part: FormatPart): string {
 
 /**
  * Derive the folder-prefix portion of the heading number from a file path.
- * Both containing folder names and the note's own filename are examined;
- * any segment that matches /^\d+_/ contributes its numeric prefix.
  *
- * Example: "001_Chapter/002_Section/003_Note.md" → "001.002.003"
+ * In "path" mode both containing folder names and the note's own filename are
+ * examined; any segment that matches /^\d+_/ contributes its numeric prefix.
+ *
+ * In "file" mode only the filename is examined, and its whole dotted number is
+ * used. Only digits and dots are accepted: heading-engine's NUMBER_SEGMENT_RE
+ * has to recognise the prefix again to strip it, so free text before the "_"
+ * ("Draft_Note.md") would make the number accumulate on every refresh.
+ *
+ * Example: "001_Chapter/002_Section/003_Note.md" → "001.002.003" (path)
+ * Example: "04_Chapter/04.02_Section/04.02.07_Note.md" → "04.02.07" (file)
  */
-export function getFolderPrefix(filePath: string): string {
+export function getFolderPrefix(
+  filePath: string,
+  prefixing: HeaderPrefixing = "path"
+): string {
   const segments = filePath.split("/");
 
   // Strip .md (or any extension) from the filename so the regex works on it too.
   const filename = segments[segments.length - 1].replace(/\.[^.]+$/, "");
   segments[segments.length - 1] = filename;
+
+  if (prefixing === "file") {
+    return filename.match(/^(\d+(?:\.\d+)*)_/)?.[1] ?? "";
+  }
 
   const nums: string[] = [];
   for (const seg of segments) {

@@ -2,6 +2,7 @@ import type {
   HeadnumaticConfig,
   HeadingChange,
   HeadingEntry,
+  HeaderPrefixing,
   NumberingResult,
 } from "./types";
 import { formatValue, getFolderPrefix } from "./numbering-parser";
@@ -92,14 +93,16 @@ function buildNumberString(
  * @param content  Full file content (including frontmatter).
  * @param config   Parsed HeadnumaticConfig for this note.
  * @param filePath Vault-relative path to the note (used to derive folder prefix).
+ * @param prefixing Which parts of the path the folder prefix is taken from.
  */
 export function processHeadings(
   content: string,
   config: HeadnumaticConfig,
-  filePath: string
+  filePath: string,
+  prefixing: HeaderPrefixing = "path"
 ): NumberingResult {
   const lines = content.split("\n");
-  const folderPrefix = config.usesFolderPrefix ? getFolderPrefix(filePath) : "";
+  const folderPrefix = config.usesFolderPrefix ? getFolderPrefix(filePath, prefixing) : "";
   const bodyStart = findBodyStart(lines);
 
   const numLevels = config.maxLevel - config.firstLevel + 1;

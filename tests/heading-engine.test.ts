@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { processHeadings, parseHeadings, diffHeadings } from "../src/heading-engine";
-import { parseHeadnumaticConfig, validateHeadnumaticRaw } from "../src/numbering-parser";
+import { getFolderPrefix, parseHeadnumaticConfig, validateHeadnumaticRaw } from "../src/numbering-parser";
 import type { HeadingEntry } from "../src/types";
 
 // Note: a comma is required between each directive. The original spec had
@@ -621,5 +621,46 @@ describe("tests/heading-engine.test.ts", () => {
       .newContent;
 
     assert.strictEqual(out, "# 1 - v1.2.3 - Release notes");
+  });
+
+  test("TEST 20 – path prefixing only reads single-number segments", () => {
+    const dotted = "Docs/04_UI/04.02_Admin/04.02.07_Email.md";
+
+    assert.strictEqual(getFolderPrefix("Docs/04_UI/02_Admin/07_Email.md"), "04.02.07");
+    assert.strictEqual(getFolderPrefix(dotted), "04");
+    assert.strictEqual(getFolderPrefix(dotted, "path"), "04");
+  });
+
+  test("TEST 21 – file prefixing uses the filename's whole number and ignores folders", () => {
+    assert.strictEqual(getFolderPrefix("Docs/04_UI/04.02_Admin/04.02.07_Email.md", "file"), "04.02.07");
+    assert.strictEqual(getFolderPrefix("99_Other/04.09_Event.md", "file"), "04.09");
+    assert.strictEqual(getFolderPrefix("99_Other/04_Event.md", "file"), "04");
+    assert.strictEqual(getFolderPrefix("04.09_Event v1.2_final.md", "file"), "04.09");
+  });
+
+  test("TEST 22 – file prefixing leaves out a filename without a leading number", () => {
+    for (const name of ["Draft_Email.md", "Email.md", "04.09 Email.md", "04._Email.md", ".04_Email.md"]) {
+      assert.strictEqual(getFolderPrefix(`04_UI/${name}`, "file"), "", name);
+    }
+  });
+
+  test("TEST 23 – file prefixing renumbers existing headings and stays idempotent", () => {
+    const config = parseHeadnumaticConfig(
+      "auto-refresh, first-level 3, max-level 6, format ?.01.01.a, start-values ?.1.1.a"
+    )!;
+    const path = "Rendszerterv/04_UI/04.02_Admin/04.02.07_Email.md";
+    const input = ["### 04.01 - Related", "### 04.02 - Screen", "#### 04.02.01 - Rights"].join("\n");
+
+    const once = processHeadings(input, config, path, "file");
+
+    assert.deepStrictEqual(once.newContent.split("\n"), [
+      "### 04.02.07.01 - Related",
+      "### 04.02.07.02 - Screen",
+      "#### 04.02.07.02.01 - Rights",
+    ]);
+
+    const twice = processHeadings(once.newContent, config, path, "file");
+    assert.strictEqual(twice.newContent, once.newContent);
+    assert.deepStrictEqual(twice.changes, []);
   });
 });

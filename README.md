@@ -101,7 +101,7 @@ The format string uses `.` as a separator. Each segment describes how one level 
 
 | Segment | Meaning | Example output |
 |---------|---------|----------------|
-| `?` | Prefix derived from the containing folder names and the note's filename. Always rendered first, wherever it appears in the string. | `001.002` |
+| `?` | Prefix derived from the containing folder names and the note's filename, or from the filename alone, depending on the [**Header prefixing**](#plugin-settings) setting. Always rendered first, wherever it appears in the string. | `001.002` |
 | `001` (multiple digits) | Zero-padded integer, padded to the segment's digit count. | `001`, `042` |
 | `1` (single digit) | Plain integer, no padding. | `1`, `42` |
 | `a` | Lowercase letter (`a`…`z`, wrapping back to `a` after 26). | `a`, `z` |
@@ -146,6 +146,8 @@ max-level 5
 
 The `?` prefix (`001.002.003`) comes from the two containing folders **and the note's own filename**.  
 Any segment (folder or filename) that does *not* start with `<digits>_` is omitted from the prefix. If no segment qualifies, the prefix is empty and is left out entirely.
+
+This is the default **Header prefixing** mode; see [Plugin Settings](#plugin-settings) for the filename-only alternative.
 
 ### Example without folder prefix
 
@@ -214,6 +216,7 @@ Supported link forms:
 ```
 [[Note#001.002.003.001 - Old Heading]]
 [[Note#001.002.003.001 - Old Heading|Display label]]
+[[Note#001.002.003.001 - Old Heading\|Display label]]   (inside a table, where the pipe has to be escaped)
 [[path/to/Note#001.002.003.001 - Old Heading]]
 [label](Note#001.002.003.001%20-%20Old%20Heading)
 ```
@@ -246,6 +249,21 @@ The two are independent.
 The rename switch is off by default because Obsidian already does that job: leaving it off avoids a full vault read on every rename, for no loss of function. Turn it on only if you keep Obsidian's own *Automatically update internal links* disabled — otherwise both features rewrite the same links.
 
 The renumbering switch defaults to on and has no built-in equivalent to fall back on; with it off, links elsewhere in the vault go stale until you re-enable it and run one of the refresh commands.
+
+### Header prefixing
+
+Vault-wide choice of where the `?` format segment takes its number from. Notes whose format has no `?` are unaffected.
+
+| Option | Prefix comes from | Accepted names | Example | Prefix |
+|--------|-------------------|----------------|---------|--------|
+| **All directories and file** (default) | The number before the `_` of every folder on the path and of the note's filename | Plain digits only. A dotted name such as `04.02_Admin` does not count and adds nothing to the prefix. | `04_UI/02_Admin/07_Email.md` | `04.02.07` |
+| **File only** | The full number before the `_` of the note's filename. Folders are ignored. | Digits, optionally separated by dots | `04_UI/04.02_Admin/04.02.07_Email.md` | `04.02.07` |
+
+Use **File only** when each filename already carries its complete number. With **All directories and file**, the second example above would get the prefix `04`, because only `04_UI` matches.
+
+In **File only** mode, a filename whose part before the `_` is not a number (`Draft_Email.md`), or that has no `_` at all, gets no prefix. Free text is rejected because the plugin could not recognise it as a number and remove it on the next refresh, so it would pile up in the heading.
+
+Changing the setting does not rewrite anything by itself. A note picks up the new prefix the next time it is edited with `auto-refresh` on or when you run one of the refresh commands, and links to its headings are updated as usual.
 
 ---
 

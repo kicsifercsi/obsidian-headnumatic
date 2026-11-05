@@ -6,6 +6,16 @@ export interface FormatPart {
   digits: number;
 }
 
+/**
+ * Where the `?` format segment takes its number from.
+ *
+ * - "path": the leading number of every folder on the path and of the note's
+ *   filename ("001_A/002_B/003_Note.md" → "001.002.003").
+ * - "file": only the note's filename, keeping its dotted number whole
+ *   ("04_A/04.02_B/04.02.07_Note.md" → "04.02.07").
+ */
+export type HeaderPrefixing = "path" | "file";
+
 export interface HeadnumaticConfig {
   autoRefresh: boolean;
   /** Heading level at which numbering starts (1–6). Spec says > 1 is valid, but we accept 1 too. */

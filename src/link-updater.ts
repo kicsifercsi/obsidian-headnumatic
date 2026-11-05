@@ -13,6 +13,7 @@ import type { HeadingChange } from "./types";
  * Supported link forms:
  *   [[Note#Old Heading Text]]
  *   [[Note#Old Heading Text|Display]]
+ *   [[Note#Old Heading Text\|Display]]   (alias pipe escaped inside a table)
  *   [[path/to/Note#Old Heading Text]]
  *   [text](Note#Old%20Heading%20Text)   (encoded or plain)
  *
@@ -88,9 +89,11 @@ function replaceHeadingInLinks(
   const newHeadingEsc = newHeading;
 
   // Wikilink: [[Note#Heading]] or [[Note#Heading|Display]]
-  // The note part can be just the basename or a full path.
+  // The note part can be just the basename or a full path. Inside a table the
+  // alias separator is written "\|" so the table does not take it for a column
+  // break; the backslash is kept as part of the alias.
   const wikiRe = new RegExp(
-    `(\\[\\[)([^\\[\\]#|]+)#(${oldEsc})(\\|[^\\]]*)?\\]\\]`,
+    `(\\[\\[)([^\\[\\]#|]+)#(${oldEsc})(\\\\?\\|[^\\]]*)?\\]\\]`,
     "g"
   );
 

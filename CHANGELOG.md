@@ -12,6 +12,19 @@ Releases before 0.4.22 predate this file; see the commit history for those.
 
 ## [Unreleased]
 
+### Added
+
+- **Header prefixing** setting, which chooses where the `?` format segment takes
+  its number from: every folder and the filename (the default and the existing
+  behaviour), or only the filename, using its full dotted number
+  (`04.02.07_Email.md` gives `04.02.07`).
+
+### Fixed
+
+- Links to a renumbered or renamed heading are now updated when they sit in a
+  table and escape their alias pipe (`[[Note#Heading\|Label]]`). These were
+  skipped, in the note itself and across the vault.
+
 ## [0.4.23] - 2026-08-19
 
 ### Changed

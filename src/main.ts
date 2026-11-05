@@ -20,7 +20,7 @@ import {
   rewriteHeadingLinksInContent,
 } from "./link-updater";
 import { computeLineEdits, insertionAtCursor } from "./line-diff";
-import type { HeadingEntry } from "./types";
+import type { HeaderPrefixing, HeadingEntry } from "./types";
 
 const MALFORMED_NOTICE = "Malformed settings, check headnumatic-numbering property!";
 
@@ -46,11 +46,15 @@ interface HeadnumaticSettings {
    * own setting is disabled.
    */
   updateAllLinksOnRename: boolean;
+
+  /** Where the `?` format segment takes its number from. */
+  headerPrefixing: HeaderPrefixing;
 }
 
 const DEFAULT_SETTINGS: HeadnumaticSettings = {
   updateAllLinksOnRenumber: true,
   updateAllLinksOnRename: false,
+  headerPrefixing: "path",
 };
 
 export default class HeadnumaticPlugin extends Plugin {
@@ -287,7 +291,7 @@ export default class HeadnumaticPlugin extends Plugin {
     content: string,
     config: HeadnumaticConfig
   ): Promise<void> {
-    const result = processHeadings(content, config, file.path);
+    const result = processHeadings(content, config, file.path, this.settings.headerPrefixing);
 
     // Diff the heading snapshot (what links currently point to) against the
     // freshly numbered headings to get reliable old→new text mappings. This
@@ -395,7 +399,7 @@ export default class HeadnumaticPlugin extends Plugin {
     const config = parseHeadnumaticConfig(rawProp);
     if (!config) return false;
 
-    const result = processHeadings(content, config, file.path);
+    const result = processHeadings(content, config, file.path, this.settings.headerPrefixing);
 
     const oldHeadings = this.headingSnapshots.get(file.path) ?? parseHeadings(content);
     const newHeadings = parseHeadings(result.newContent);
@@ -416,7 +420,7 @@ export default class HeadnumaticPlugin extends Plugin {
       // from the on-disk content rather than writing back a stale snapshot.
       await this.app.vault.process(file, (data) =>
         rewriteHeadingLinksInContent(
-          processHeadings(data, config, file.path).newContent,
+          processHeadings(data, config, file.path, this.settings.headerPrefixing).newContent,
           file,
           changeMap,
           this.app
@@ -524,6 +528,20 @@ const RENAME_SETTING_DESC =
   "you keep that disabled: it makes the plugin read every note in the " +
   "vault on every rename.";
 
+const PREFIXING_SETTING_NAME = "Header prefixing";
+const PREFIXING_SETTING_DESC =
+  "Where the ? format segment takes its number from. All directories and " +
+  "file: the number before the _ of every folder on the path and of the " +
+  "note's filename, each of which must be plain digits (04_UI/02_Admin/" +
+  "07_Email.md gives 04.02.07). File only: the full number before the _ of " +
+  "the note's filename, which may contain dots, and folders are ignored " +
+  "(04_UI/04.02_Admin/04.02.07_Email.md gives 04.02.07). Existing notes " +
+  "change the next time they are edited or refreshed.";
+const PREFIXING_SETTING_OPTIONS: Record<HeaderPrefixing, string> = {
+  path: "All directories and file",
+  file: "File only",
+};
+
 class HeadnumaticSettingTab extends PluginSettingTab {
   plugin: HeadnumaticPlugin;
 
@@ -560,6 +578,16 @@ class HeadnumaticSettingTab extends PluginSettingTab {
           defaultValue: DEFAULT_SETTINGS.updateAllLinksOnRename,
         },
       },
+      {
+        name: PREFIXING_SETTING_NAME,
+        desc: PREFIXING_SETTING_DESC,
+        control: {
+          type: "dropdown",
+          key: "headerPrefixing",
+          defaultValue: DEFAULT_SETTINGS.headerPrefixing,
+          options: PREFIXING_SETTING_OPTIONS,
+        },
+      },
     ];
   }
 
@@ -591,6 +619,19 @@ class HeadnumaticSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.updateAllLinksOnRename)
           .onChange(async (value) => {
             this.plugin.settings.updateAllLinksOnRename = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(PREFIXING_SETTING_NAME)
+      .setDesc(PREFIXING_SETTING_DESC)
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(PREFIXING_SETTING_OPTIONS)
+          .setValue(this.plugin.settings.headerPrefixing)
+          .onChange(async (value) => {
+            this.plugin.settings.headerPrefixing = value as HeaderPrefixing;
             await this.plugin.saveSettings();
           })
       );

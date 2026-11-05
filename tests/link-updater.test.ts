@@ -1,6 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { updateHeadingLinks, updateLinksAfterRename } from "../src/link-updater";
+import {
+  rewriteHeadingLinksInContent,
+  updateHeadingLinks,
+  updateLinksAfterRename,
+} from "../src/link-updater";
 
 // ---------------------------------------------------------------------------
 // Minimal Obsidian App stub.
@@ -303,5 +307,51 @@ describe("tests/link-updater.test.ts", () => {
 
     assert.deepEqual(writes, ["has-link.md"]);
     assert.equal(store["no-links.md"], "nothing to see");
+  });
+
+  test("TEST 13 – heading-link updates reach links with a table-escaped alias pipe", async () => {
+    // Inside a table the alias separator has to be written as "\|", or the
+    // table would take it for a column break.
+    const { app, store } = makeApp({
+      "other.md": [
+        "| Name | Type |",
+        "| Rights | [[05_Entities#05.01.01 - Right\\|Right]] |",
+        "| Path | [[docs/05_Entities#05.01.01 - Right\\|Right]] |",
+        "| Unrelated | [[Other#05.01.01 - Right\\|Right]] |",
+      ].join("\n"),
+    });
+
+    await updateHeadingLinks(app, fileRef("docs/05_Entities.md"), [
+      { oldText: "05.01.01 - Right", newText: "05.01.01 - Rights", level: 3, line: 0 },
+    ]);
+
+    assert.deepEqual(store["other.md"].split("\n"), [
+      "| Name | Type |",
+      "| Rights | [[05_Entities#05.01.01 - Rights\\|Right]] |",
+      "| Path | [[docs/05_Entities#05.01.01 - Rights\\|Right]] |",
+      "| Unrelated | [[Other#05.01.01 - Right\\|Right]] |",
+    ]);
+  });
+
+  test("TEST 14 – a note's links to its own headings update in a table too", () => {
+    const { app } = makeApp({});
+    const content = [
+      "### 05.01.01 - Rights",
+      "| Rights | [[05_Entities#05.01.01 - Right\\|Right]] |",
+      "Plain: [[05_Entities#05.01.01 - Right|Right]]",
+    ].join("\n");
+
+    const out = rewriteHeadingLinksInContent(
+      content,
+      fileRef("05_Entities.md"),
+      new Map([["05.01.01 - Right", "05.01.01 - Rights"]]),
+      app
+    );
+
+    assert.deepEqual(out.split("\n"), [
+      "### 05.01.01 - Rights",
+      "| Rights | [[05_Entities#05.01.01 - Rights\\|Right]] |",
+      "Plain: [[05_Entities#05.01.01 - Rights|Right]]",
+    ]);
   });
 });
